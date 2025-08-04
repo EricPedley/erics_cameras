@@ -146,38 +146,21 @@ if __name__ == '__main__':
                     point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
                 )[0].squeeze()
 
-                for i, pt in enumerate(point_references.image_points):
+                for pt in point_references.image_points:
                     cv.circle(
-                        img_debug, tuple(pt.squeeze().astype(int)), 10, (255, 0, 0), -1
-                    )
-                    cv.putText(
-                        img_debug,
-                        f"{i}",
-                        tuple((pt.squeeze() + np.array([0,10])).astype(int)),
-                        cv.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (255,0,0),
-                        1,
+                        img_debug, tuple(pt.squeeze().astype(int)), 7, (255, 0, 0), -1
                     )
 
-                for i, pt in enumerate(reproj):
-                    if np.any(np.isnan(pt)):
-                        continue
-                    cv.circle(img_debug, tuple(pt.astype(int)), 7, (0, 0, 255), -1)
-                    cv.putText(
-                        img_debug,
-                        f"{i}",
-                        tuple((pt + np.array([0,-10])).astype(int)),
-                        cv.FONT_HERSHEY_SIMPLEX,
-                        0.5,
-                        (0, 0, 255),
-                        1,
-                    )
                 img_avg_reproj_err = np.mean(
                     np.linalg.norm(
                         point_references.image_points.squeeze() - reproj, axis=1
                     )
                 )
+                for pt in reproj:
+                    if np.any(np.isnan(pt)) or np.any(pt<0):
+                        continue
+                    cv.circle(img_debug, tuple(pt.astype(int)), 5,(0, 0, 255) if img_avg_reproj_err > 1 else (0,255,0),-1)
+                
             if rvecs is None or tvecs is None:
                 do_skip_pose = True
             else:
