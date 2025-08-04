@@ -15,6 +15,8 @@ except ModuleNotFoundError:
     from queue import Queue
 
 import threading
+from .camera import Camera
+from .types import Image
 
 
 class FrameReader(threading.Thread):
@@ -70,12 +72,13 @@ class Previewer(threading.Thread):
         self._running = False
 
 
-class GstCamera(object):
+class GstCamera(Camera):
     frame_reader = None
     cap = None
     previewer = None
 
-    def __init__(self, gst_pipeline: str):
+    def __init__(self, log_dir, gst_pipeline: str):
+        super().__init__(log_dir)
         self.open_camera(gst_pipeline)
 
     def open_camera(self, pipeline):
@@ -93,6 +96,12 @@ class GstCamera(object):
 
     def getFrame(self):
         return self.frame_reader.getFrame()
+
+    def take_image(self):
+        frame = self.getFrame()
+        if frame is None:
+            return None
+        return Image(frame[:,:,:3])
 
     def close(self):
         self.frame_reader.stop()

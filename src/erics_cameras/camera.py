@@ -14,7 +14,7 @@ import numpy as np
 from .types import Image
 
 
-class ImageBuffer:
+class ImageBuffer: 
     """
     Buffer for one Image implementing a Lock for multithreading.
     """
@@ -99,8 +99,6 @@ class CameraLogger:
             json.dump(
                 {
                     "timestamp": metadata.timestamp,
-                    "focal_len_px": metadata.focal_len_px,
-                    "relative_pose": metadata.relative_pose.to_dict(),
                 },
                 open(self.log_dir / f"{image._id}.json", "w"),
             )

@@ -80,7 +80,9 @@ if LIVE:
 
     camera.start_recording()
     cv.namedWindow("calib", cv.WINDOW_NORMAL)
+    cv.namedWindow("charuco_board", cv.WINDOW_NORMAL)
     cv.resizeWindow("calib", (1600, 900))
+    board_img = charuco_board.generateImage((1920, 1080))
 
 index = 0
 imgs_path = logs_path / "calib_imgs"
@@ -91,7 +93,6 @@ det_results: list[BoardDetectionResults] = []
 
 while True:
     if LIVE:
-        camera.do_autofocus()
         img_bgr = camera.take_image().get_array()
     else:
         if index == len(images):
@@ -141,6 +142,7 @@ while True:
 
     if LIVE:
         cv.imshow("calib", img_debug)
+        cv.imshow("charuco_board", board_img)
         key = cv.waitKey(1)
     else:
         key = 1
