@@ -6,7 +6,7 @@ import numpy as np
 import os
 
 from erics_cameras import Camera, GazeboCamera, USBCam, CSICam, RTSPCamera
-from time import strftime
+from time import strftime, time
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +55,8 @@ dist_coeffs = np.zeros(5)
 
 total_object_points = []
 total_image_points = []
-total_images_used = []
+num_total_images_used = 0
+last_image_add_time = time()
 
 LIVE = bool(os.getenv("LIVE", True))
 
@@ -99,6 +100,10 @@ det_results: list[BoardDetectionResults] = []
 
 latest_error = None
 
+pose_circular_buffer = np.empty((100, 6), dtype=np.float32)
+pose_circular_buffer_index = 0
+pose_circular_buffer_size = 0
+
 while True:
     if LIVE:
         img_bgr = camera.take_image().get_array()
@@ -116,6 +121,7 @@ while True:
     detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray))
 
     img_avg_reproj_err = None
+    closest_pose_dist = None
     if (
         detection_results.charuco_corners is not None
         and len(detection_results.charuco_corners) > 4
@@ -171,17 +177,55 @@ while True:
                     point_references.image_points.squeeze() - reproj, axis=1
                 )
             )
+        if rvecs is None or tvecs is None:
+            do_skip_pose = True
+        else:
+            combo_vec = np.concatenate((rvecs.squeeze(), tvecs.squeeze()))
+            if pose_circular_buffer_size > 0 and (closest_pose_dist:=np.min(np.linalg.norm(pose_circular_buffer[:pose_circular_buffer_size] - combo_vec.reshape((1,6)), axis=1))) < 500:
+                do_skip_pose = True
+            else:
+                pose_circular_buffer[pose_circular_buffer_index] = combo_vec
+                pose_circular_buffer_index = (pose_circular_buffer_index + 1) % pose_circular_buffer.shape[0]
+                pose_circular_buffer_size = min(pose_circular_buffer_size + 1, pose_circular_buffer.shape[0])
+                do_skip_pose = False
+            if time() - last_image_add_time < 1:
+                do_skip_pose = True
     else:
         point_references = None
+        do_skip_pose = True
 
     if LIVE:
+        text_color = (255,0,0)
+        if img_avg_reproj_err is not None:
+            if img_avg_reproj_err < 1:
+                text_color = (0, 255, 0)
+            else:
+                text_color = (0, 0, 255)
         cv.putText(
             img_debug,
             f"Rep Error: {img_avg_reproj_err:.2f}" if img_avg_reproj_err is not None else "Rep Error: N/A",
-            (10, 30),
+            (10, 20),
             cv.FONT_HERSHEY_SIMPLEX,
             1,
-            (0, 255, 0),
+            text_color,
+            2,
+        )
+        cv.putText(
+            img_debug,
+            f"Number of images used: {num_total_images_used}",
+            (10, 40),
+            cv.FONT_HERSHEY_SIMPLEX,
+            1,
+            (255,255,255),
+            2,
+        )
+        cv.putText(
+            img_debug,
+            f"Closest pose dist: {closest_pose_dist:.2f}" if closest_pose_dist is not None else "Closest pose dist: N/A",
+            (10, 60),
+            cv.FONT_HERSHEY_SIMPLEX,
+            1,
+            (255,255,255),
             2,
         )
         cv.imshow("calib", img_debug)
@@ -190,17 +234,23 @@ while True:
     else:
         key = 1
     shape = img_bgr.shape[:2]
-    if img_avg_reproj_err is not None and img_avg_reproj_err > 1 and len(point_references.object_points) > 4:
+    if not do_skip_pose and img_avg_reproj_err is not None and img_avg_reproj_err > 1 and len(point_references.object_points) > 4:
+        if closest_pose_dist is not None:
+            print(closest_pose_dist)
         total_object_points.append(point_references.object_points)
         total_image_points.append(point_references.image_points)
-        total_images_used.append(img_bgr)
+        CALIB_BATCH_SIZE = 10
+        is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
+        num_total_images_used +=1
+        last_image_add_time = time()
         if (
-            LIVE and len(total_images_used) > 30 and len(total_images_used) % 30 == 0
+            LIVE and num_total_images_used > CALIB_BATCH_SIZE and is_time_to_calib
         ) or (not LIVE and index == len(images)):
+            sample_indices = np.random.choice(np.arange(num_total_images_used), min(50, num_total_images_used))
             calibration_results = CameraCalibrationResults(
                 *cv.calibrateCamera(
-                    total_object_points,
-                    total_image_points,
+                    [total_object_points[i] for i in sample_indices],
+                    [total_image_points[i] for i in sample_indices],
                     shape,
                     None,  # type: ignore
                     None,  # type: ignore
