@@ -51,8 +51,8 @@ if __name__ == '__main__':
         dictionary=charuco_marker_dictionary,
     )
 
-    cam_mat = np.array([[1000, 0, 1920 // 2], [0, 1000, 1080 // 2], [0, 0, 1]])
-    dist_coeffs = np.zeros(5)
+    cam_mat = np.array([[1000, 0, 1920 / 2], [0, 1000, 1080 / 2], [0, 0, 1]], dtype=np.float32)
+    dist_coeffs = np.zeros((1,5), dtype=np.float32)
 
     total_object_points = []
     total_image_points = []
@@ -172,7 +172,7 @@ if __name__ == '__main__':
                     pose_circular_buffer_index = (pose_circular_buffer_index + 1) % pose_circular_buffer.shape[0]
                     pose_circular_buffer_size = min(pose_circular_buffer_size + 1, pose_circular_buffer.shape[0])
                     do_skip_pose = False
-                if time() - last_image_add_time < 1:
+                if time() - last_image_add_time < 0.5:
                     do_skip_pose = True
         else:
             point_references = None
@@ -227,33 +227,42 @@ if __name__ == '__main__':
             key = 1
         shape = img_bgr.shape[:2]
         if not do_skip_pose and img_avg_reproj_err is not None and img_avg_reproj_err > 1 and len(point_references.object_points) > 4:
-            if closest_pose_dist is not None:
-                print(closest_pose_dist)
             total_object_points.append(point_references.object_points)
             total_image_points.append(point_references.image_points)
             CALIB_BATCH_SIZE = 10
-            is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
             num_total_images_used +=1
+            is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
             last_image_add_time = time()
-            if (
-                LIVE and num_total_images_used > CALIB_BATCH_SIZE and is_time_to_calib
-            ) or (not LIVE and index == len(images)):
+
+            if LIVE:
+                calibration_criteria_met = num_total_images_used >= CALIB_BATCH_SIZE and is_time_to_calib
+            else:
+                calibration_criteria_met = index == len(images)
+
+            if calibration_criteria_met:
                 sample_indices = np.random.choice(np.arange(num_total_images_used), min(50, num_total_images_used))
+                if num_total_images_used <= CALIB_BATCH_SIZE:
+                    flags = None
+                elif num_total_images_used <= 2*CALIB_BATCH_SIZE:
+                    flags = cv.CALIB_RATIONAL_MODEL
+                else:
+                    flags = cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL 
+                last_nonzero_dist_coef_limit = max([5]+[i+1 for i in range(5,len(dist_coeffs)) if dist_coeffs[0,i]!=0.0])
                 calibration_results = CameraCalibrationResults(
                     *cv.calibrateCamera(
                         [total_object_points[i] for i in sample_indices],
                         [total_image_points[i] for i in sample_indices],
                         shape,
-                        None,  # type: ignore
-                        None,  # type: ignore
-                        flags=cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL if num_total_images_used > CALIB_BATCH_SIZE else None
+                        None if flags is None else cam_mat,  # type: ignore
+                        None if flags is None else dist_coeffs[:,:last_nonzero_dist_coef_limit],  # type: ignore
+                        flags=flags
                     )
                 )
 
-                print(calibration_results.repError)
+                print(f'Reproj error: {calibration_results.repError}')
                 latest_error = calibration_results.repError
-                print(calibration_results.camMatrix)
-                print(calibration_results.distcoeff)
+                print(f'cam_mat = np.array({",".join(str(calibration_results.camMatrix).split())})')
+                print(f'dist_coeffs = np.array({",".join(str(calibration_results.distcoeff).split())})')
                 cam_mat = calibration_results.camMatrix
                 dist_coeffs = calibration_results.distcoeff
             if LIVE:
@@ -261,19 +270,3 @@ if __name__ == '__main__':
 
         if key == ord("q"):
             break
-
-
-    res = cv.aruco.calibrateCameraCharucoExtended(
-        [d.charuco_corners for d in det_results],
-        [d.charuco_ids for d in det_results],
-        charuco_board,
-        (1848, 3280),
-        cam_mat,
-        dist_coeffs,  # type: ignore
-        flags=cv.CALIB_RATIONAL_MODEL+ cv.CALIB_THIN_PRISM_MODEL if num_total_images_used > CALIB_BATCH_SIZE else None,
-        criteria=(cv.TERM_CRITERIA_EPS & cv.TERM_CRITERIA_COUNT, 10000, 1e-9),
-    )
-
-    print(res[0])  # repError
-    print(res[1].__repr__())  # camMatrix
-    print(res[2].__repr__())  # distcoeff
