@@ -8,7 +8,6 @@ from enum import Enum
 from scipy.spatial.transform import Rotation
 from shared.types import Pose
 
-import torch
 
 integer = Union[
     int,
@@ -50,7 +49,7 @@ HWC = ImageDimensionsOrder(HEIGHT, WIDTH, CHANNELS)
 CHW = ImageDimensionsOrder(CHANNELS, HEIGHT, WIDTH)
 _VALID_DIM_ORDERS = {HWC, CHW}
 
-_UnderlyingImageT = TypeVar("_UnderlyingImageT", np.ndarray, torch.Tensor)
+_UnderlyingImageT = TypeVar("_UnderlyingImageT", np.ndarray, np.ndarray)
 
 _id = 0
 
@@ -74,7 +73,7 @@ class Image(Generic[_UnderlyingImageT]):
     """
 
     def __init__(self, array: _UnderlyingImageT, dim_order: ImageDimensionsOrder = HWC):
-        if not isinstance(array, np.ndarray) and not isinstance(array, torch.Tensor):
+        if not isinstance(array, np.ndarray) and not isinstance(array):
             raise TypeError(
                 f"array must be a numpy array or torch tensor. Got {type(array)}"
             )
@@ -105,7 +104,7 @@ class Image(Generic[_UnderlyingImageT]):
         self,
         key,
         value: Union[
-            np.ndarray, torch.Tensor, "Image", int, float, np.number, torch.NumberType
+            np.ndarray, "Image", int, float, np.number
         ],
     ):
         if isinstance(value, Image):
@@ -160,9 +159,9 @@ class Image(Generic[_UnderlyingImageT]):
     def from_file(
         fp: str,
         dim_order: ImageDimensionsOrder = HWC,
-        array_type: type[np.ndarray | torch.Tensor] = np.ndarray,
+        array_type: type[np.ndarray] = np.ndarray,
         dtype: type[integer] = np.uint8,
-    ) -> "Image[np.ndarray] | Image[torch.Tensor]":
+    ) -> "Image[np.ndarray]":
         """
         Reads an image from a file. Uses cv2.imread internally, so the image will be in BGR format.
 
@@ -177,15 +176,6 @@ class Image(Generic[_UnderlyingImageT]):
         """
         if array_type == np.ndarray:
             array = cv2.imread(fp).astype(dtype)
-            img = Image(array, HWC)
-            if dim_order != HWC:
-                img.change_dim_order(dim_order)
-
-            return img
-
-        elif array_type == torch.Tensor:
-            # Inherits np.ndarray's dtype
-            array = torch.from_numpy(cv2.imread(fp).astype(dtype))
             img = Image(array, HWC)
             if dim_order != HWC:
                 img.change_dim_order(dim_order)
@@ -224,8 +214,6 @@ class Image(Generic[_UnderlyingImageT]):
 
         if isinstance(self._array, np.ndarray):
             self._array = self._array.transpose(transposition_indices)
-        elif isinstance(self._array, torch.Tensor):
-            self._array = self._array.permute(transposition_indices)
         else:
             TypeError("Inner array must be a numpy array or torch tensor")
 
