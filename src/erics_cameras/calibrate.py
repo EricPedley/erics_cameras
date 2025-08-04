@@ -105,6 +105,8 @@ if __name__ == '__main__':
     pose_circular_buffer_index = 0
     pose_circular_buffer_size = 0
 
+    last_detection_results = None
+
     while True:
         if LIVE:
             img_bgr = camera.take_image().get_array()
@@ -146,14 +148,16 @@ if __name__ == '__main__':
                     point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
                 )[0].squeeze()
 
-                for pt in point_references.image_points:
+                image_points = point_references.image_points.squeeze()
+
+                for pt in image_points:
                     cv.circle(
-                        img_debug, tuple(pt.squeeze().astype(int)), 7, (255, 0, 0), -1
+                        img_debug, tuple(pt.astype(int)), 7, (255, 0, 0), -1
                     )
 
                 img_avg_reproj_err = np.mean(
                     np.linalg.norm(
-                        point_references.image_points.squeeze() - reproj, axis=1
+                        image_points - reproj, axis=1
                     )
                 )
                 for pt in reproj:
@@ -161,11 +165,52 @@ if __name__ == '__main__':
                         continue
                     cv.circle(img_debug, tuple(pt.astype(int)), 5,(0, 0, 255) if img_avg_reproj_err > 1 else (0,255,0),-1)
                 
-            if rvecs is None or tvecs is None:
+                movement_magnitude = 1e9
+                if last_detection_results is not None:
+                    current_ids = [id for id in detection_results.charuco_ids.squeeze().tolist()]
+                    last_ids = [id for id in last_detection_results.charuco_ids.squeeze().tolist()]
+                    intersecting_ids = [i for i in current_ids if i in last_ids]
+                    if len(intersecting_ids) > 2:
+                        current_intersect_charuco_corners = np.array([
+                            corner
+                            for id, corner in zip(
+                                current_ids,
+                                detection_results.charuco_corners
+                            ) if id in last_ids
+                        ])
+
+                    
+                        last_intersect_charuco_corners = np.array([
+                            corner
+                            for id, corner in zip(
+                                last_ids,
+                                last_detection_results.charuco_corners
+                            ) if id in current_ids
+                        ])
+
+                        current_intersecting_point_references = PointReferences(
+                            *charuco_board.matchImagePoints(
+                                current_intersect_charuco_corners, np.array(intersecting_ids).reshape((-1, 1))
+                            )
+                        )
+
+                        last_intersection_point_references = PointReferences(
+                            *charuco_board.matchImagePoints(
+                                last_intersect_charuco_corners, np.array(intersecting_ids).reshape((-1, 1))
+                            )
+                        )
+
+                        movement_magnitude = np.mean(np.linalg.norm(current_intersecting_point_references.image_points.squeeze() - last_intersection_point_references.image_points.squeeze(), axis=1))
+                last_detection_results = detection_results
+
+
+                
+            if rvecs is None or tvecs is None :
                 do_skip_pose = True
             else:
                 combo_vec = np.concatenate((rvecs.squeeze(), tvecs.squeeze()))
-                if pose_circular_buffer_size > 0 and (closest_pose_dist:=np.min(np.linalg.norm(pose_circular_buffer[:pose_circular_buffer_size] - combo_vec.reshape((1,6)), axis=1))) < 500:
+                pose_too_close = pose_circular_buffer_size > 0 and (closest_pose_dist:=np.min(np.linalg.norm(pose_circular_buffer[:pose_circular_buffer_size] - combo_vec.reshape((1,6)), axis=1))) < 500
+                if pose_too_close or movement_magnitude>1:
                     do_skip_pose = True
                 else:
                     pose_circular_buffer[pose_circular_buffer_index] = combo_vec
