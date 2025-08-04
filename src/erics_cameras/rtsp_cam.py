@@ -1,4 +1,4 @@
-from .gst_camera import GstCamera
+from .gst_cam import GstCamera
 from pathlib import Path
 
 

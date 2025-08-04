@@ -5,7 +5,7 @@ from typing import NamedTuple
 import numpy as np
 import os
 
-from erics_cameras import Camera, GazeboCamera, USBCam, CSICam
+from erics_cameras import Camera, GazeboCamera, USBCam, CSICam, RTSPCamera
 from time import strftime
 from pathlib import Path
 from typing import Any
@@ -59,6 +59,7 @@ if LIVE:
         0: usb camera
         1: CSI camera
         2: gazebo cam
+        3: rtsp cam
     """).strip()
     show_gui = input("GUI? (y,n,r) (r=reduced, 64x36 image)")
     logs_base = Path("logs/nvme")
@@ -73,6 +74,9 @@ if LIVE:
     elif camera_selection == "2":
         logs_path = logs_base / "gazebo" / time_dir
         camera = GazeboCamera(logs_path)
+    elif camera_selection == "3":
+        logs_path = logs_base / "rtsp" / time_dir
+        camera = RTSPCamera(logs_path)
 
     camera.start_recording()
     cv.namedWindow("calib", cv.WINDOW_NORMAL)

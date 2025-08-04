@@ -1,5 +1,5 @@
 from .camera import Camera, ImageMetadata
-from .gst_camera import GstCamera
+from .gst_cam import GstCamera
 import time
 from pathlib import Path
 from perception.types import Image

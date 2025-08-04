@@ -1,4 +1,4 @@
-from .gst_camera import GstCamera
+from .gst_cam import GstCamera
 from perception.camera.camera import Camera
 from enum import Enum
 from pathlib import Path
