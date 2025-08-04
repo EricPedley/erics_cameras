@@ -89,7 +89,7 @@ if __name__ == '__main__':
         cv.namedWindow("calib", cv.WINDOW_NORMAL)
         cv.namedWindow("charuco_board", cv.WINDOW_NORMAL)
         cv.resizeWindow("calib", (1600, 900))
-        board_img = cv.rotate(charuco_board.generateImage((1920,1080)), cv.ROTATE_90_CLOCKWISE)
+        board_img = cv.cvtColor(cv.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv.ROTATE_90_CLOCKWISE), cv.COLOR_GRAY2BGR)
         cv.resizeWindow("charuco_board", (1600,900))
 
     index = 0
@@ -179,39 +179,47 @@ if __name__ == '__main__':
             do_skip_pose = True
 
         if LIVE:
-            text_color = (255,0,0)
+            text_color = (255,120,0)
             if img_avg_reproj_err is not None:
                 if img_avg_reproj_err < 1:
                     text_color = (0, 255, 0)
                 else:
                     text_color = (0, 0, 255)
-            cv.putText(
-                img_debug,
-                f"Rep Error: {img_avg_reproj_err:.2f}" if img_avg_reproj_err is not None else "Rep Error: N/A",
-                (10, 20),
-                cv.FONT_HERSHEY_SIMPLEX,
-                1,
-                text_color,
-                2,
-            )
-            cv.putText(
-                img_debug,
-                f"Number of images used: {num_total_images_used}",
-                (10, 40),
-                cv.FONT_HERSHEY_SIMPLEX,
-                1,
-                (255,255,255),
-                2,
-            )
-            cv.putText(
-                img_debug,
-                f"Closest pose dist: {closest_pose_dist:.2f}" if closest_pose_dist is not None else "Closest pose dist: N/A",
-                (10, 60),
-                cv.FONT_HERSHEY_SIMPLEX,
-                1,
-                (255,255,255),
-                2,
-            )
+            for img in (img_debug, board_img):
+                cv.rectangle(
+                    img,
+                    (0,0),
+                    (180, 50),
+                    (0,0,0),
+                    -1
+                )
+                cv.putText(
+                    img,
+                    f"Reproj Err: {img_avg_reproj_err:.2f}" if img_avg_reproj_err is not None else "Reproj Err: N/A",
+                    (5, 15),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    text_color,
+                    1,
+                )
+                cv.putText(
+                    img,
+                    f"N good imgs: {num_total_images_used}",
+                    (5, 25),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255,255,255),
+                    1,
+                )
+                cv.putText(
+                    img,
+                    f"Originality: {closest_pose_dist/500:.2f}" if closest_pose_dist is not None else "Originality: N/A",
+                    (5, 35),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255,255,255),
+                    1,
+                )
             cv.imshow("calib", img_debug)
             cv.imshow("charuco_board", board_img)
             key = cv.waitKey(1)
