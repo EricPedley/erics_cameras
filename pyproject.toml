@@ -1,6 +1,6 @@
 [tools.setuptools]
-package-dir = {"erics_cameras" = "src"}
-packages = ["erics_cameras", "erics_cameras.gazebo"]
+[tools.setuptools.packages.find]
+where = ["src"]
 
 [project]
 name = "erics_cameras"
