@@ -10,6 +10,12 @@ from time import strftime
 from pathlib import Path
 from typing import Any
 
+import argparse
+
+parser = argparse.ArgumentParser(description="Camera calibration script.")
+parser.add_argument(
+    "--cam_type", help="Type of camera to use for calibration.", choices=["0", "1", "2", "3"], default=None
+)
 
 class BoardDetectionResults(NamedTuple):
     charuco_corners: Any
@@ -60,8 +66,7 @@ if LIVE:
         1: CSI camera
         2: gazebo cam
         3: rtsp cam
-    """).strip()
-    show_gui = input("GUI? (y,n,r) (r=reduced, 64x36 image)")
+    """).strip() if not parser.parse_args().cam_type else parser.parse_args().cam_type
     logs_base = Path("logs/nvme")
     time_dir = Path(strftime("%Y-%m-%d_%H-%M"))
 
@@ -82,7 +87,8 @@ if LIVE:
     cv.namedWindow("calib", cv.WINDOW_NORMAL)
     cv.namedWindow("charuco_board", cv.WINDOW_NORMAL)
     cv.resizeWindow("calib", (1600, 900))
-    board_img = charuco_board.generateImage((1920, 1080))
+    board_img = cv.rotate(charuco_board.generateImage((1920,1080)), cv.ROTATE_90_CLOCKWISE)
+    cv.resizeWindow("charuco_board", (1600,900))
 
 index = 0
 imgs_path = logs_path / "calib_imgs"
@@ -90,6 +96,8 @@ imgs_path.mkdir(exist_ok=True)
 images = sorted(list(imgs_path.glob("*.png")))
 
 det_results: list[BoardDetectionResults] = []
+
+latest_error = None
 
 while True:
     if LIVE:
@@ -107,6 +115,7 @@ while True:
     charuco_detector = cv.aruco.CharucoDetector(charuco_board)
     detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray))
 
+    img_avg_reproj_err = None
     if (
         detection_results.charuco_corners is not None
         and len(detection_results.charuco_corners) > 4
@@ -126,35 +135,67 @@ while True:
             flags=cv.SOLVEPNP_IPPE,
         )
         if ret:
-            reproj = cv.projectPoints(
+            reproj: np.ndarray = cv.projectPoints(
                 point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
             )[0].squeeze()
 
-            for pt in point_references.image_points:
+            for i, pt in enumerate(point_references.image_points):
                 cv.circle(
                     img_debug, tuple(pt.squeeze().astype(int)), 10, (255, 0, 0), -1
                 )
+                cv.putText(
+                    img_debug,
+                    f"{i}",
+                    tuple((pt.squeeze() + np.array([0,10])).astype(int)),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255,0,0),
+                    1,
+                )
 
-            for pt in reproj:
+            for i, pt in enumerate(reproj):
+                if np.any(np.isnan(pt)):
+                    continue
                 cv.circle(img_debug, tuple(pt.astype(int)), 7, (0, 0, 255), -1)
+                cv.putText(
+                    img_debug,
+                    f"{i}",
+                    tuple((pt + np.array([0,-10])).astype(int)),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 0, 255),
+                    1,
+                )
+            img_avg_reproj_err = np.mean(
+                np.linalg.norm(
+                    point_references.image_points.squeeze() - reproj, axis=1
+                )
+            )
     else:
         point_references = None
 
     if LIVE:
+        cv.putText(
+            img_debug,
+            f"Rep Error: {img_avg_reproj_err:.2f}" if img_avg_reproj_err is not None else "Rep Error: N/A",
+            (10, 30),
+            cv.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 255, 0),
+            2,
+        )
         cv.imshow("calib", img_debug)
         cv.imshow("charuco_board", board_img)
         key = cv.waitKey(1)
     else:
         key = 1
     shape = img_bgr.shape[:2]
-    if (not LIVE) or key == 13:
-        print(len(total_images_used))
-        if point_references is not None and len(point_references.object_points) > 4:
-            total_object_points.append(point_references.object_points)
-            total_image_points.append(point_references.image_points)
-            total_images_used.append(img_bgr)
+    if img_avg_reproj_err is not None and img_avg_reproj_err > 1 and len(point_references.object_points) > 4:
+        total_object_points.append(point_references.object_points)
+        total_image_points.append(point_references.image_points)
+        total_images_used.append(img_bgr)
         if (
-            LIVE and len(total_images_used) > 5 and len(total_images_used) % 5 == 0
+            LIVE and len(total_images_used) > 30 and len(total_images_used) % 30 == 0
         ) or (not LIVE and index == len(images)):
             calibration_results = CameraCalibrationResults(
                 *cv.calibrateCamera(
@@ -168,13 +209,15 @@ while True:
             )
 
             print(calibration_results.repError)
+            latest_error = calibration_results.repError
             print(calibration_results.camMatrix)
             print(calibration_results.distcoeff)
-            pass
+            cam_mat = calibration_results.camMatrix
+            dist_coeffs = calibration_results.distcoeff
         if LIVE:
             cv.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
 
-    elif key == ord("q"):
+    if key == ord("q"):
         break
 
 
