@@ -229,7 +229,7 @@ if __name__ == '__main__':
         if not do_skip_pose and img_avg_reproj_err is not None and img_avg_reproj_err > 1 and len(point_references.object_points) > 4:
             total_object_points.append(point_references.object_points)
             total_image_points.append(point_references.image_points)
-            CALIB_BATCH_SIZE = 10
+            CALIB_BATCH_SIZE = 15
             num_total_images_used +=1
             is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
             last_image_add_time = time()
@@ -240,7 +240,7 @@ if __name__ == '__main__':
                 calibration_criteria_met = index == len(images)
 
             if calibration_criteria_met:
-                sample_indices = np.random.choice(np.arange(num_total_images_used), min(50, num_total_images_used))
+                sample_indices = np.random.choice(np.arange(num_total_images_used), min(60, num_total_images_used))
                 if num_total_images_used <= CALIB_BATCH_SIZE:
                     flags = None
                 elif num_total_images_used <= 2*CALIB_BATCH_SIZE:
