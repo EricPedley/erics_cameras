@@ -150,22 +150,14 @@ if __name__ == '__main__':
 
                 image_points = point_references.image_points.squeeze()
 
-                for pt in image_points:
-                    cv.circle(
-                        img_debug, tuple(pt.astype(int)), 7, (255, 0, 0), -1
-                    )
 
                 img_avg_reproj_err = np.mean(
                     np.linalg.norm(
                         image_points - reproj, axis=1
                     )
                 )
-                for pt in reproj:
-                    if np.any(np.isnan(pt)) or np.any(pt<0):
-                        continue
-                    cv.circle(img_debug, tuple(pt.astype(int)), 5,(0, 0, 255) if img_avg_reproj_err > 1 else (0,255,0),-1)
                 
-                movement_magnitude = 1e9
+                movement_magnitude=1e9
                 if last_detection_results is not None:
                     current_ids = [id for id in detection_results.charuco_ids.squeeze().tolist()]
                     last_ids = [id for id in last_detection_results.charuco_ids.squeeze().tolist()]
@@ -202,6 +194,16 @@ if __name__ == '__main__':
 
                         movement_magnitude = np.mean(np.linalg.norm(current_intersecting_point_references.image_points.squeeze() - last_intersection_point_references.image_points.squeeze(), axis=1))
                 last_detection_results = detection_results
+
+                for pt in image_points:
+                    green_amount = int((1-np.tanh(4*(movement_magnitude-1.5)))/4 *255) if movement_magnitude>1 else 255
+                    cv.circle(
+                        img_debug, tuple(pt.astype(int)), 7, (255, green_amount, 0), -1
+                    )
+                for pt in reproj:
+                    if np.any(np.isnan(pt)) or np.any(pt<0):
+                        continue
+                    cv.circle(img_debug, tuple(pt.astype(int)), 5,(0, 0, 255) if img_avg_reproj_err > 1 else (0,255,0),-1)
 
 
                 
