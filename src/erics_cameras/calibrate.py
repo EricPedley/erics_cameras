@@ -12,280 +12,281 @@ from typing import Any
 
 import argparse
 
-parser = argparse.ArgumentParser(description="Camera calibration script.")
-parser.add_argument(
-    "--cam_type", help="Type of camera to use for calibration.", choices=["0", "1", "2", "3"], default=None
-)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Camera calibration script.")
+    parser.add_argument(
+        "--cam_type", help="Type of camera to use for calibration.", choices=["0", "1", "2", "3"], default=None
+    )
 
-class BoardDetectionResults(NamedTuple):
-    charuco_corners: Any
-    charuco_ids: Any
-    aruco_corners: Any
-    aruco_ids: Any
-
-
-class PointReferences(NamedTuple):
-    object_points: Any
-    image_points: Any
+    class BoardDetectionResults(NamedTuple):
+        charuco_corners: Any
+        charuco_ids: Any
+        aruco_corners: Any
+        aruco_ids: Any
 
 
-class CameraCalibrationResults(NamedTuple):
-    repError: float
-    camMatrix: Any
-    distcoeff: Any
-    rvecs: Any
-    tvecs: Any
+    class PointReferences(NamedTuple):
+        object_points: Any
+        image_points: Any
 
 
-SQUARE_LENGTH = 500
-MARKER_LENGHT = 300
-NUMBER_OF_SQUARES_VERTICALLY = 11
-NUMBER_OF_SQUARES_HORIZONTALLY = 8
+    class CameraCalibrationResults(NamedTuple):
+        repError: float
+        camMatrix: Any
+        distcoeff: Any
+        rvecs: Any
+        tvecs: Any
 
-charuco_marker_dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_6X6_250)
-charuco_board = cv.aruco.CharucoBoard(
-    size=(NUMBER_OF_SQUARES_HORIZONTALLY, NUMBER_OF_SQUARES_VERTICALLY),
-    squareLength=SQUARE_LENGTH,
-    markerLength=MARKER_LENGHT,
-    dictionary=charuco_marker_dictionary,
-)
 
-cam_mat = np.array([[1000, 0, 1920 // 2], [0, 1000, 1080 // 2], [0, 0, 1]])
-dist_coeffs = np.zeros(5)
+    SQUARE_LENGTH = 500
+    MARKER_LENGHT = 300
+    NUMBER_OF_SQUARES_VERTICALLY = 11
+    NUMBER_OF_SQUARES_HORIZONTALLY = 8
 
-total_object_points = []
-total_image_points = []
-num_total_images_used = 0
-last_image_add_time = time()
+    charuco_marker_dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_6X6_250)
+    charuco_board = cv.aruco.CharucoBoard(
+        size=(NUMBER_OF_SQUARES_HORIZONTALLY, NUMBER_OF_SQUARES_VERTICALLY),
+        squareLength=SQUARE_LENGTH,
+        markerLength=MARKER_LENGHT,
+        dictionary=charuco_marker_dictionary,
+    )
 
-LIVE = bool(os.getenv("LIVE", True))
+    cam_mat = np.array([[1000, 0, 1920 // 2], [0, 1000, 1080 // 2], [0, 0, 1]])
+    dist_coeffs = np.zeros(5)
 
-if LIVE:
-    camera_selection = input("""
-        Enter camera selection:
-        0: usb camera
-        1: CSI camera
-        2: gazebo cam
-        3: rtsp cam
-    """).strip() if not parser.parse_args().cam_type else parser.parse_args().cam_type
-    logs_base = Path("logs/nvme")
-    time_dir = Path(strftime("%Y-%m-%d_%H-%M"))
+    total_object_points = []
+    total_image_points = []
+    num_total_images_used = 0
+    last_image_add_time = time()
 
-    if camera_selection == "0":
-        logs_path = logs_base / "usb" / time_dir
-        camera: Camera = USBCam(logs_path)
-    elif camera_selection == "1":
-        logs_path = logs_base / "csi" / time_dir
-        camera: Camera = CSICam(logs_path, CSICam.ResolutionOption.R4K)
-    elif camera_selection == "2":
-        logs_path = logs_base / "gazebo" / time_dir
-        camera = GazeboCamera(logs_path)
-    elif camera_selection == "3":
-        logs_path = logs_base / "rtsp" / time_dir
-        camera = RTSPCamera(logs_path)
-
-    camera.start_recording()
-    cv.namedWindow("calib", cv.WINDOW_NORMAL)
-    cv.namedWindow("charuco_board", cv.WINDOW_NORMAL)
-    cv.resizeWindow("calib", (1600, 900))
-    board_img = cv.rotate(charuco_board.generateImage((1920,1080)), cv.ROTATE_90_CLOCKWISE)
-    cv.resizeWindow("charuco_board", (1600,900))
-
-index = 0
-imgs_path = logs_path / "calib_imgs"
-imgs_path.mkdir(exist_ok=True)
-images = sorted(list(imgs_path.glob("*.png")))
-
-det_results: list[BoardDetectionResults] = []
-
-latest_error = None
-
-pose_circular_buffer = np.empty((100, 6), dtype=np.float32)
-pose_circular_buffer_index = 0
-pose_circular_buffer_size = 0
-
-while True:
-    if LIVE:
-        img_bgr = camera.take_image().get_array()
-    else:
-        if index == len(images):
-            break
-        img_bgr = cv.imread(f"{images[index]}")
-        index += 1
-        print(f"Processing image {index}/{len(images)}")
-
-    img_debug = img_bgr.copy()
-
-    img_gray = cv.cvtColor(img_bgr, cv.COLOR_BGR2GRAY)
-    charuco_detector = cv.aruco.CharucoDetector(charuco_board)
-    detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray))
-
-    img_avg_reproj_err = None
-    closest_pose_dist = None
-    if (
-        detection_results.charuco_corners is not None
-        and len(detection_results.charuco_corners) > 4
-    ):
-        det_results.append(detection_results)
-        point_references = PointReferences(
-            *charuco_board.matchImagePoints(
-                detection_results.charuco_corners, detection_results.charuco_ids
-            )
-        )
-
-        ret, rvecs, tvecs = cv.solvePnP(
-            point_references.object_points,
-            point_references.image_points,
-            cam_mat,
-            dist_coeffs,
-            flags=cv.SOLVEPNP_IPPE,
-        )
-        if ret:
-            reproj: np.ndarray = cv.projectPoints(
-                point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
-            )[0].squeeze()
-
-            for i, pt in enumerate(point_references.image_points):
-                cv.circle(
-                    img_debug, tuple(pt.squeeze().astype(int)), 10, (255, 0, 0), -1
-                )
-                cv.putText(
-                    img_debug,
-                    f"{i}",
-                    tuple((pt.squeeze() + np.array([0,10])).astype(int)),
-                    cv.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (255,0,0),
-                    1,
-                )
-
-            for i, pt in enumerate(reproj):
-                if np.any(np.isnan(pt)):
-                    continue
-                cv.circle(img_debug, tuple(pt.astype(int)), 7, (0, 0, 255), -1)
-                cv.putText(
-                    img_debug,
-                    f"{i}",
-                    tuple((pt + np.array([0,-10])).astype(int)),
-                    cv.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 0, 255),
-                    1,
-                )
-            img_avg_reproj_err = np.mean(
-                np.linalg.norm(
-                    point_references.image_points.squeeze() - reproj, axis=1
-                )
-            )
-        if rvecs is None or tvecs is None:
-            do_skip_pose = True
-        else:
-            combo_vec = np.concatenate((rvecs.squeeze(), tvecs.squeeze()))
-            if pose_circular_buffer_size > 0 and (closest_pose_dist:=np.min(np.linalg.norm(pose_circular_buffer[:pose_circular_buffer_size] - combo_vec.reshape((1,6)), axis=1))) < 500:
-                do_skip_pose = True
-            else:
-                pose_circular_buffer[pose_circular_buffer_index] = combo_vec
-                pose_circular_buffer_index = (pose_circular_buffer_index + 1) % pose_circular_buffer.shape[0]
-                pose_circular_buffer_size = min(pose_circular_buffer_size + 1, pose_circular_buffer.shape[0])
-                do_skip_pose = False
-            if time() - last_image_add_time < 1:
-                do_skip_pose = True
-    else:
-        point_references = None
-        do_skip_pose = True
+    LIVE = bool(os.getenv("LIVE", True))
 
     if LIVE:
-        text_color = (255,0,0)
-        if img_avg_reproj_err is not None:
-            if img_avg_reproj_err < 1:
-                text_color = (0, 255, 0)
-            else:
-                text_color = (0, 0, 255)
-        cv.putText(
-            img_debug,
-            f"Rep Error: {img_avg_reproj_err:.2f}" if img_avg_reproj_err is not None else "Rep Error: N/A",
-            (10, 20),
-            cv.FONT_HERSHEY_SIMPLEX,
-            1,
-            text_color,
-            2,
-        )
-        cv.putText(
-            img_debug,
-            f"Number of images used: {num_total_images_used}",
-            (10, 40),
-            cv.FONT_HERSHEY_SIMPLEX,
-            1,
-            (255,255,255),
-            2,
-        )
-        cv.putText(
-            img_debug,
-            f"Closest pose dist: {closest_pose_dist:.2f}" if closest_pose_dist is not None else "Closest pose dist: N/A",
-            (10, 60),
-            cv.FONT_HERSHEY_SIMPLEX,
-            1,
-            (255,255,255),
-            2,
-        )
-        cv.imshow("calib", img_debug)
-        cv.imshow("charuco_board", board_img)
-        key = cv.waitKey(1)
-    else:
-        key = 1
-    shape = img_bgr.shape[:2]
-    if not do_skip_pose and img_avg_reproj_err is not None and img_avg_reproj_err > 1 and len(point_references.object_points) > 4:
-        if closest_pose_dist is not None:
-            print(closest_pose_dist)
-        total_object_points.append(point_references.object_points)
-        total_image_points.append(point_references.image_points)
-        CALIB_BATCH_SIZE = 10
-        is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
-        num_total_images_used +=1
-        last_image_add_time = time()
-        if (
-            LIVE and num_total_images_used > CALIB_BATCH_SIZE and is_time_to_calib
-        ) or (not LIVE and index == len(images)):
-            sample_indices = np.random.choice(np.arange(num_total_images_used), min(50, num_total_images_used))
-            calibration_results = CameraCalibrationResults(
-                *cv.calibrateCamera(
-                    [total_object_points[i] for i in sample_indices],
-                    [total_image_points[i] for i in sample_indices],
-                    shape,
-                    None,  # type: ignore
-                    None,  # type: ignore
-                    flags=cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL,  # + cv.CALIB_USE_INTRINSIC_GUESS
-                )
-            )
+        camera_selection = input("""
+            Enter camera selection:
+            0: usb camera
+            1: CSI camera
+            2: gazebo cam
+            3: rtsp cam
+        """).strip() if not parser.parse_args().cam_type else parser.parse_args().cam_type
+        logs_base = Path("logs/nvme")
+        time_dir = Path(strftime("%Y-%m-%d_%H-%M"))
 
-            print(calibration_results.repError)
-            latest_error = calibration_results.repError
-            print(calibration_results.camMatrix)
-            print(calibration_results.distcoeff)
-            cam_mat = calibration_results.camMatrix
-            dist_coeffs = calibration_results.distcoeff
+        if camera_selection == "0":
+            logs_path = logs_base / "usb" / time_dir
+            camera: Camera = USBCam(logs_path)
+        elif camera_selection == "1":
+            logs_path = logs_base / "csi" / time_dir
+            camera: Camera = CSICam(logs_path, CSICam.ResolutionOption.R4K)
+        elif camera_selection == "2":
+            logs_path = logs_base / "gazebo" / time_dir
+            camera = GazeboCamera(logs_path)
+        elif camera_selection == "3":
+            logs_path = logs_base / "rtsp" / time_dir
+            camera = RTSPCamera(logs_path)
+
+        camera.start_recording()
+        cv.namedWindow("calib", cv.WINDOW_NORMAL)
+        cv.namedWindow("charuco_board", cv.WINDOW_NORMAL)
+        cv.resizeWindow("calib", (1600, 900))
+        board_img = cv.rotate(charuco_board.generateImage((1920,1080)), cv.ROTATE_90_CLOCKWISE)
+        cv.resizeWindow("charuco_board", (1600,900))
+
+    index = 0
+    imgs_path = logs_path / "calib_imgs"
+    imgs_path.mkdir(exist_ok=True)
+    images = sorted(list(imgs_path.glob("*.png")))
+
+    det_results: list[BoardDetectionResults] = []
+
+    latest_error = None
+
+    pose_circular_buffer = np.empty((100, 6), dtype=np.float32)
+    pose_circular_buffer_index = 0
+    pose_circular_buffer_size = 0
+
+    while True:
         if LIVE:
-            cv.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
+            img_bgr = camera.take_image().get_array()
+        else:
+            if index == len(images):
+                break
+            img_bgr = cv.imread(f"{images[index]}")
+            index += 1
+            print(f"Processing image {index}/{len(images)}")
 
-    if key == ord("q"):
-        break
+        img_debug = img_bgr.copy()
+
+        img_gray = cv.cvtColor(img_bgr, cv.COLOR_BGR2GRAY)
+        charuco_detector = cv.aruco.CharucoDetector(charuco_board)
+        detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray))
+
+        img_avg_reproj_err = None
+        closest_pose_dist = None
+        if (
+            detection_results.charuco_corners is not None
+            and len(detection_results.charuco_corners) > 4
+        ):
+            det_results.append(detection_results)
+            point_references = PointReferences(
+                *charuco_board.matchImagePoints(
+                    detection_results.charuco_corners, detection_results.charuco_ids
+                )
+            )
+
+            ret, rvecs, tvecs = cv.solvePnP(
+                point_references.object_points,
+                point_references.image_points,
+                cam_mat,
+                dist_coeffs,
+                flags=cv.SOLVEPNP_IPPE,
+            )
+            if ret:
+                reproj: np.ndarray = cv.projectPoints(
+                    point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
+                )[0].squeeze()
+
+                for i, pt in enumerate(point_references.image_points):
+                    cv.circle(
+                        img_debug, tuple(pt.squeeze().astype(int)), 10, (255, 0, 0), -1
+                    )
+                    cv.putText(
+                        img_debug,
+                        f"{i}",
+                        tuple((pt.squeeze() + np.array([0,10])).astype(int)),
+                        cv.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255,0,0),
+                        1,
+                    )
+
+                for i, pt in enumerate(reproj):
+                    if np.any(np.isnan(pt)):
+                        continue
+                    cv.circle(img_debug, tuple(pt.astype(int)), 7, (0, 0, 255), -1)
+                    cv.putText(
+                        img_debug,
+                        f"{i}",
+                        tuple((pt + np.array([0,-10])).astype(int)),
+                        cv.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 0, 255),
+                        1,
+                    )
+                img_avg_reproj_err = np.mean(
+                    np.linalg.norm(
+                        point_references.image_points.squeeze() - reproj, axis=1
+                    )
+                )
+            if rvecs is None or tvecs is None:
+                do_skip_pose = True
+            else:
+                combo_vec = np.concatenate((rvecs.squeeze(), tvecs.squeeze()))
+                if pose_circular_buffer_size > 0 and (closest_pose_dist:=np.min(np.linalg.norm(pose_circular_buffer[:pose_circular_buffer_size] - combo_vec.reshape((1,6)), axis=1))) < 500:
+                    do_skip_pose = True
+                else:
+                    pose_circular_buffer[pose_circular_buffer_index] = combo_vec
+                    pose_circular_buffer_index = (pose_circular_buffer_index + 1) % pose_circular_buffer.shape[0]
+                    pose_circular_buffer_size = min(pose_circular_buffer_size + 1, pose_circular_buffer.shape[0])
+                    do_skip_pose = False
+                if time() - last_image_add_time < 1:
+                    do_skip_pose = True
+        else:
+            point_references = None
+            do_skip_pose = True
+
+        if LIVE:
+            text_color = (255,0,0)
+            if img_avg_reproj_err is not None:
+                if img_avg_reproj_err < 1:
+                    text_color = (0, 255, 0)
+                else:
+                    text_color = (0, 0, 255)
+            cv.putText(
+                img_debug,
+                f"Rep Error: {img_avg_reproj_err:.2f}" if img_avg_reproj_err is not None else "Rep Error: N/A",
+                (10, 20),
+                cv.FONT_HERSHEY_SIMPLEX,
+                1,
+                text_color,
+                2,
+            )
+            cv.putText(
+                img_debug,
+                f"Number of images used: {num_total_images_used}",
+                (10, 40),
+                cv.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255,255,255),
+                2,
+            )
+            cv.putText(
+                img_debug,
+                f"Closest pose dist: {closest_pose_dist:.2f}" if closest_pose_dist is not None else "Closest pose dist: N/A",
+                (10, 60),
+                cv.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255,255,255),
+                2,
+            )
+            cv.imshow("calib", img_debug)
+            cv.imshow("charuco_board", board_img)
+            key = cv.waitKey(1)
+        else:
+            key = 1
+        shape = img_bgr.shape[:2]
+        if not do_skip_pose and img_avg_reproj_err is not None and img_avg_reproj_err > 1 and len(point_references.object_points) > 4:
+            if closest_pose_dist is not None:
+                print(closest_pose_dist)
+            total_object_points.append(point_references.object_points)
+            total_image_points.append(point_references.image_points)
+            CALIB_BATCH_SIZE = 10
+            is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
+            num_total_images_used +=1
+            last_image_add_time = time()
+            if (
+                LIVE and num_total_images_used > CALIB_BATCH_SIZE and is_time_to_calib
+            ) or (not LIVE and index == len(images)):
+                sample_indices = np.random.choice(np.arange(num_total_images_used), min(50, num_total_images_used))
+                calibration_results = CameraCalibrationResults(
+                    *cv.calibrateCamera(
+                        [total_object_points[i] for i in sample_indices],
+                        [total_image_points[i] for i in sample_indices],
+                        shape,
+                        None,  # type: ignore
+                        None,  # type: ignore
+                        flags=cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL,  # + cv.CALIB_USE_INTRINSIC_GUESS
+                    )
+                )
+
+                print(calibration_results.repError)
+                latest_error = calibration_results.repError
+                print(calibration_results.camMatrix)
+                print(calibration_results.distcoeff)
+                cam_mat = calibration_results.camMatrix
+                dist_coeffs = calibration_results.distcoeff
+            if LIVE:
+                cv.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
+
+        if key == ord("q"):
+            break
 
 
-res = cv.aruco.calibrateCameraCharucoExtended(
-    [d.charuco_corners for d in det_results],
-    [d.charuco_ids for d in det_results],
-    charuco_board,
-    (1848, 3280),
-    cam_mat,
-    dist_coeffs,  # type: ignore
-    # None,
-    # flags=cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL + cv.CALIB_TILTED_MODEL + cv.CALIB_USE_INTRINSIC_GUESS,
-    flags=cv.CALIB_RATIONAL_MODEL+ cv.CALIB_THIN_PRISM_MODEL,
-    # + cv.CALIB_USE_INTRINSIC_GUESS
-    # + cv.CALIB_TILTED_MODEL,
-    criteria=(cv.TERM_CRITERIA_EPS & cv.TERM_CRITERIA_COUNT, 10000, 1e-9),
-)
+    res = cv.aruco.calibrateCameraCharucoExtended(
+        [d.charuco_corners for d in det_results],
+        [d.charuco_ids for d in det_results],
+        charuco_board,
+        (1848, 3280),
+        cam_mat,
+        dist_coeffs,  # type: ignore
+        # None,
+        # flags=cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL + cv.CALIB_TILTED_MODEL + cv.CALIB_USE_INTRINSIC_GUESS,
+        flags=cv.CALIB_RATIONAL_MODEL+ cv.CALIB_THIN_PRISM_MODEL,
+        # + cv.CALIB_USE_INTRINSIC_GUESS
+        # + cv.CALIB_TILTED_MODEL,
+        criteria=(cv.TERM_CRITERIA_EPS & cv.TERM_CRITERIA_COUNT, 10000, 1e-9),
+    )
 
-print(res[0])  # repError
-print(res[1].__repr__())  # camMatrix
-print(res[2].__repr__())  # distcoeff
+    print(res[0])  # repError
+    print(res[1].__repr__())  # camMatrix
+    print(res[2].__repr__())  # distcoeff
