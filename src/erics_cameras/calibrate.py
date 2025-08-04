@@ -246,7 +246,7 @@ if __name__ == '__main__':
                         shape,
                         None,  # type: ignore
                         None,  # type: ignore
-                        flags=cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL,  # + cv.CALIB_USE_INTRINSIC_GUESS
+                        flags=cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL if num_total_images_used > CALIB_BATCH_SIZE else None
                     )
                 )
 
@@ -270,11 +270,7 @@ if __name__ == '__main__':
         (1848, 3280),
         cam_mat,
         dist_coeffs,  # type: ignore
-        # None,
-        # flags=cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL + cv.CALIB_TILTED_MODEL + cv.CALIB_USE_INTRINSIC_GUESS,
-        flags=cv.CALIB_RATIONAL_MODEL+ cv.CALIB_THIN_PRISM_MODEL,
-        # + cv.CALIB_USE_INTRINSIC_GUESS
-        # + cv.CALIB_TILTED_MODEL,
+        flags=cv.CALIB_RATIONAL_MODEL+ cv.CALIB_THIN_PRISM_MODEL if num_total_images_used > CALIB_BATCH_SIZE else None,
         criteria=(cv.TERM_CRITERIA_EPS & cv.TERM_CRITERIA_COUNT, 10000, 1e-9),
     )
 
