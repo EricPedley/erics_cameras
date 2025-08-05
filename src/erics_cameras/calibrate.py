@@ -109,7 +109,11 @@ if __name__ == '__main__':
 
     while True:
         if LIVE:
-            img_bgr = camera.take_image().get_array()
+            img = camera.take_image()
+            if img is None:
+                print("Failed to get image")
+                continue
+            img_bgr = img.get_array()
         else:
             if index == len(images):
                 break
@@ -308,8 +312,9 @@ if __name__ == '__main__':
 
                 print(f'Reproj error: {calibration_results.repError}')
                 latest_error = calibration_results.repError
-                print(f'cam_mat = np.array({",".join(str(calibration_results.camMatrix).split())})')
-                print(f'dist_coeffs = np.array({",".join(str(calibration_results.distcoeff).split())})')
+                print(f'cam_mat = np.array({",".join(str(calibration_results.camMatrix).split())})'.replace('[,','['))
+                print('# k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4, Tx, Ty')
+                print(f'dist_coeffs = np.array({",".join(str(calibration_results.distcoeff).split())})'.replace('[,','['))
                 cam_mat = calibration_results.camMatrix
                 dist_coeffs = calibration_results.distcoeff
             if LIVE:
