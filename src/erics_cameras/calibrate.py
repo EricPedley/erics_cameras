@@ -284,13 +284,13 @@ if __name__ == '__main__':
 
             if calibration_criteria_met:
                 sample_indices = np.random.choice(np.arange(num_total_images_used), min(60, num_total_images_used))
-                if num_total_images_used <= CALIB_BATCH_SIZE:
-                    flags = None
-                elif num_total_images_used <= 2*CALIB_BATCH_SIZE:
-                    flags = cv.CALIB_RATIONAL_MODEL
-                else:
-                    flags = cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL 
-                flags = None
+                # if num_total_images_used <= CALIB_BATCH_SIZE:
+                #     flags = None
+                # elif num_total_images_used <= 2*CALIB_BATCH_SIZE:
+                #     flags = cv.CALIB_RATIONAL_MODEL
+                # else:
+                #     flags = cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL 
+                flags = cv.CALIB_FIX_S1_S2_S3_S4
                 last_nonzero_dist_coef_limit = max([5]+[i+1 for i in range(5,len(dist_coeffs)) if dist_coeffs[0,i]!=0.0])
                 calibration_results = CameraCalibrationResults(
                     *cv.calibrateCamera(
