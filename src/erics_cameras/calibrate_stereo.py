@@ -66,18 +66,25 @@ if __name__ == '__main__':
         time_dir = Path(strftime("%Y-%m-%d/%H-%M"))
         logs_path = logs_base / time_dir
 
-        pipeline = (
+        pipeline_l = (
             "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36  ! "
             "video/x-raw,format=BGR,width=1280,height=960,framerate=30/1 ! "
             "videoconvert ! appsink drop=1 max-buffers=1"
         )
-        camera = GstCamera("./testimages", pipeline)
+        camera_l = GstCamera(None, pipeline_l)
+        pipeline_r = (
+            "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@88000/ov5647@36  ! "
+            "video/x-raw,format=BGR,width=1280,height=960,framerate=30/1 ! "
+            "videoconvert ! appsink drop=1 max-buffers=1"
+        )
+        camera_r = GstCamera(None, pipeline_r)
         # camera.start_recording()
         # cv.namedWindow("calib", cv.WINDOW_NORMAL)
-        cv.namedWindow("charuco_board", cv.WINDOW_NORMAL)
+        cv.namedWindow("left", cv.WINDOW_NORMAL)
+        cv.namedWindow("right", cv.WINDOW_NORMAL)
         # cv.resizeWindow("calib", (1024, 576))
-        board_img = cv.cvtColor(cv.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv.ROTATE_90_CLOCKWISE), cv.COLOR_GRAY2BGR)
-        cv.resizeWindow("charuco_board", (1600,900))
+        # board_img = cv.cvtColor(cv.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv.ROTATE_90_CLOCKWISE), cv.COLOR_GRAY2BGR)
+        # cv.resizeWindow("charuco_board", (1600,900))
 
     index = 0
     imgs_path = logs_path / "calib_imgs"
@@ -96,11 +103,13 @@ if __name__ == '__main__':
 
     while True:
         if LIVE:
-            img = camera.take_image()
+            img_l = camera.take_image()
+            img_r = camera.take_image()
             if img is None:
                 print("Failed to get image")
                 continue
-            img_bgr = img.get_array()
+            img_bgr_l = img_l.get_array()
+            img_bgr_r = img_r.get_array()
             # cv.imshow("debug", img_bgr)
         else:
             if index == len(images):
@@ -109,10 +118,12 @@ if __name__ == '__main__':
             index += 1
             print(f"Processing image {index}/{len(images)}")
 
-        img_debug = img_bgr.copy()
+        img_l_debug = img_bgr_l.copy()
+        img_r_debug = img_bgr_r.copy()
         # img_debug = img_bgr
 
-        img_gray = cv.cvtColor(img_bgr, cv.COLOR_BGR2GRAY)
+        img_gray_l = cv.cvtColor(img_bgr_l, cv.COLOR_BGR2GRAY)
+        img_gray_r = cv.cvtColor(img_bgr_r, cv.COLOR_BGR2GRAY)
         charuco_detector = cv.aruco.CharucoDetector(charuco_board)
         detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray))
 
