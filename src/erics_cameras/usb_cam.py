@@ -18,14 +18,15 @@ class USBCam(Camera):
     def __init__(
         self,
         log_dir: str | Path | None = None,
-        resolution: ResolutionOption = ResolutionOption.R1080P,
+        resolution: ResolutionOption = ResolutionOption.R720P,
         flipped=False,  # because of how they're mounted we might have to flip them sometimes.
-        video_path="/dev/video1",
+        video_path="/dev/video0",
     ):
         super().__init__(log_dir)
         self._flipped = (
             flipped  # TODO: just put this in the gstreamer pipeline if we need speed
         )
+        # laptop params:
         pipeline = (
             rf"v4l2src device={video_path} io-mode=2 ! "
             rf"image/jpeg,width={resolution.value[0]},height={resolution.value[1]},framerate=30/1 ! "
@@ -34,6 +35,7 @@ class USBCam(Camera):
             r"video/x-raw, format=BGR ! "
             r"appsink drop=true max-buffers=1"
         )
+        print(pipeline)
         self._resolution = resolution
         self._cam = GstCamera(log_dir, pipeline)
 
