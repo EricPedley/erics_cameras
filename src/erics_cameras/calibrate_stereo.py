@@ -59,6 +59,11 @@ if __name__ == '__main__':
     num_total_images_used = 0
     last_image_add_time = time()
 
+    # Add lists for stereo calibration
+    stereo_object_points = []
+    stereo_image_points_l = []
+    stereo_image_points_r = []
+
     LIVE = bool(os.getenv("LIVE", True))
 
     if LIVE:
@@ -103,18 +108,18 @@ if __name__ == '__main__':
 
     while True:
         if LIVE:
-            img_l = camera.take_image()
-            img_r = camera.take_image()
-            if img is None:
+            img_l = camera_l.take_image()
+            img_r = camera_r.take_image()
+            if img_l is None or img_r is None:
                 print("Failed to get image")
                 continue
             img_bgr_l = img_l.get_array()
             img_bgr_r = img_r.get_array()
-            # cv.imshow("debug", img_bgr)
         else:
             if index == len(images):
                 break
-            img_bgr = cv.imread(f"{images[index]}")
+            img_bgr_l = cv.imread(f"{images[index]}")  # Use left image
+            img_bgr_r = cv.imread(f"{images[index]}")  # Use right image (replace with correct path if needed)
             index += 1
             print(f"Processing image {index}/{len(images)}")
 
@@ -125,34 +130,53 @@ if __name__ == '__main__':
         img_gray_l = cv.cvtColor(img_bgr_l, cv.COLOR_BGR2GRAY)
         img_gray_r = cv.cvtColor(img_bgr_r, cv.COLOR_BGR2GRAY)
         charuco_detector = cv.aruco.CharucoDetector(charuco_board)
-        detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray))
+        detection_results_l = BoardDetectionResults(*charuco_detector.detectBoard(img_gray_l))
+        detection_results_r = BoardDetectionResults(*charuco_detector.detectBoard(img_gray_r))
 
-        img_avg_reproj_err = None
-        closest_pose_dist = None
+        # Find common IDs between left and right detections
         if (
-            detection_results.charuco_corners is not None
-            and len(detection_results.charuco_corners) > 4
+            detection_results_l.charuco_corners is not None and
+            detection_results_r.charuco_corners is not None and
+            len(detection_results_l.charuco_corners) > 4 and
+            len(detection_results_r.charuco_corners) > 4
         ):
-            det_results.append(detection_results)
-            point_references = PointReferences(
-                *charuco_board.matchImagePoints(
-                    detection_results.charuco_corners, detection_results.charuco_ids
-                )
-            )
+            ids_l = detection_results_l.charuco_ids.squeeze().tolist()
+            ids_r = detection_results_r.charuco_ids.squeeze().tolist()
+            common_ids = set(ids_l) - set(ids_r)
+            if len(common_ids) > 4:
+                # Get corners for common IDs
+                corners_l = np.array([corner for id, corner in zip(ids_l, detection_results_l.charuco_corners) if id in common_ids])
+                corners_r = np.array([corner for id, corner in zip(ids_r, detection_results_r.charuco_corners) if id in common_ids])
+                ids_common = np.array(common_ids).reshape((-1, 1))
+
+                point_refs_l = PointReferences(*charuco_board.matchImagePoints(corners_l, ids_common))
+                point_refs_r = PointReferences(*charuco_board.matchImagePoints(corners_r, ids_common))
+
+                # Add to stereo lists
+                stereo_object_points.append(point_refs_l.object_points)
+                stereo_image_points_l.append(point_refs_l.image_points)
+                stereo_image_points_r.append(point_refs_r.image_points)
+
+                # Optionally visualize points on debug images
+                for pt in point_refs_l.image_points.squeeze():
+                    cv.circle(img_l_debug, tuple(pt.astype(int)), 5, (0,255,0), -1)
+                for pt in point_refs_r.image_points.squeeze():
+                    cv.circle(img_r_debug, tuple(pt.astype(int)), 5, (0,255,0), -1)
+
 
             ret, rvecs, tvecs = cv.solvePnP(
-                point_references.object_points,
-                point_references.image_points,
+                point_refs_l.object_points,
+                point_refs_r.image_points,
                 cam_mat,
                 dist_coeffs,
                 flags=cv.SOLVEPNP_IPPE,
             )
             if ret:
                 reproj: np.ndarray = cv.projectPoints(
-                    point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
+                    point_refs_l.object_points, rvecs, tvecs, cam_mat, dist_coeffs
                 )[0].squeeze()
 
-                image_points = point_references.image_points.squeeze()
+                image_points = point_refs_l.image_points.squeeze()
 
 
                 img_avg_reproj_err = np.mean(
@@ -163,7 +187,7 @@ if __name__ == '__main__':
                 
                 movement_magnitude=1e9
                 if last_detection_results is not None:
-                    current_ids = [id for id in detection_results.charuco_ids.squeeze().tolist()]
+                    current_ids = [id for id in detection_results_l.charuco_ids.squeeze().tolist()]
                     last_ids = [id for id in last_detection_results.charuco_ids.squeeze().tolist()]
                     intersecting_ids = [i for i in current_ids if i in last_ids]
                     if len(intersecting_ids) > 2:
@@ -171,7 +195,7 @@ if __name__ == '__main__':
                             corner
                             for id, corner in zip(
                                 current_ids,
-                                detection_results.charuco_corners
+                                detection_results_l.charuco_corners
                             ) if id in last_ids
                         ])
 
@@ -197,18 +221,18 @@ if __name__ == '__main__':
                         )
 
                         movement_magnitude = np.mean(np.linalg.norm(current_intersecting_point_references.image_points.squeeze() - last_intersection_point_references.image_points.squeeze(), axis=1))
-                last_detection_results = detection_results
+                last_detection_results = detection_results_l
 
                 for pt in image_points:
                     green_amount = int((1-np.tanh(4*(movement_magnitude-1.5)))/4 *255) if movement_magnitude>1 else 255
                     cv.circle(
-                        img_debug, tuple(pt.astype(int)), 7, (255, green_amount, 0), -1
+                        img_bgr_l, tuple(pt.astype(int)), 7, (255, green_amount, 0), -1
                     )
                 for pt in reproj:
                     if np.any(np.isnan(pt)) or np.any(pt<0):
                         continue
                     try:
-                        cv.circle(img_debug, tuple(pt.astype(int)), 5,(0, 0, 255) if img_avg_reproj_err > 1 else (0,255,0),-1)
+                        cv.circle(img_bgr_l, tuple(pt.astype(int)), 5,(0, 0, 255) if img_avg_reproj_err > 1 else (0,255,0),-1)
                     except:
                         print("Error in cv circle")
 
@@ -239,7 +263,7 @@ if __name__ == '__main__':
                     text_color = (0, 255, 0)
                 else:
                     text_color = (0, 0, 255)
-            for img in (img_debug, board_img):
+            for img in (img_bgr_l, ):
                 cv.rectangle(
                     img,
                     (0,0),
@@ -274,12 +298,12 @@ if __name__ == '__main__':
                     (255,255,255),
                     1,
                 )
-            img_debug = cv.resize(img_debug, (1024, 576))
+            img_debug = cv.resize(img_bgr_l, (1024, 576))
             cv.imshow("calib", img_debug)
             key = cv.waitKey(1)
         else:
             key = 1
-        shape = img_bgr.shape[:2]
+        shape = img_bgr_l.shape[:2]
         if not do_skip_pose and img_avg_reproj_err is not None and img_avg_reproj_err > 1 and len(point_references.object_points) > 4:
             total_object_points.append(point_references.object_points)
             total_image_points.append(point_references.image_points)
@@ -303,36 +327,49 @@ if __name__ == '__main__':
                     flags = cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL 
                 flags = None
                 last_nonzero_dist_coef_limit = max([5]+[i+1 for i in range(5,len(dist_coeffs)) if dist_coeffs[0,i]!=0.0])
-                calibration_results = CameraCalibrationResults(
-                    *cv.calibrateCamera(
-                        [total_object_points[i] for i in sample_indices],
-                        [total_image_points[i] for i in sample_indices],
-                        shape,
-                        None if flags is None else cam_mat,  # type: ignore
-                        None if flags is None else dist_coeffs[:,:last_nonzero_dist_coef_limit],  # type: ignore
-                        flags=flags
-                    )
-                )
+                ret, CM1, dist1, CM2, dist2, R, T, E, F = cv.stereoCalibrate(stereo_object_points, stereo_image_points_l, stereo_image_points_r, matrix_l, dist_l, matrix_r, dist_r, (1280, 960))
 
-                print(f'Reproj error: {calibration_results.repError}')
-                latest_error = calibration_results.repError
-                matrix_outputs = '\n'.join([
-                    f'cam_mat = np.array({",".join(str(calibration_results.camMatrix).split())})'.replace('[,','['),
-                    '# k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4, Tx, Ty',
-                    f'dist_coeffs = np.array({",".join(str(calibration_results.distcoeff).split())})'.replace('[,','[')
-                ])
-                print(matrix_outputs)
+                print(R,T)
+                # print(f'Reproj error: {calibration_results.repError}')
+                # latest_error = calibration_results.repError
+                # matrix_outputs = '\n'.join([
+                #     f'cam_mat = np.array({",".join(str(calibration_results.camMatrix).split())})'.replace('[,','['),
+                #     '# k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4, Tx, Ty',
+                #     f'dist_coeffs = np.array({",".join(str(calibration_results.distcoeff).split())})'.replace('[,','[')
+                # ])
                 
                 num_batches = num_total_images_used//CALIB_BATCH_SIZE
                 calib_path = logs_path / 'intrinsics'
                 calib_path.mkdir(exist_ok=True, parents=True)
 
                 with open(f'{calib_path}/{num_batches}.txt', 'w+') as f:
-                    f.write(matrix_outputs)
-                cam_mat = calibration_results.camMatrix
-                dist_coeffs = calibration_results.distcoeff
+                    f.write(f'{R},{T}')
             if LIVE:
-                cv.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
+                cv.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr_l)
+
+        # Run stereo calibration when enough pairs collected
+        STEREO_CALIB_BATCH_SIZE = 15
+        if len(stereo_object_points) >= STEREO_CALIB_BATCH_SIZE:
+            print("Running stereo calibration...")
+            ret, cam_mat_l, dist_l, cam_mat_r, dist_r, R, T, E, F = cv.stereoCalibrate(
+                stereo_object_points,
+                stereo_image_points_l,
+                stereo_image_points_r,
+                cam_mat, dist_coeffs,
+                cam_mat, dist_coeffs,
+                img_bgr_l.shape[:2][::-1],
+                flags=cv.CALIB_FIX_INTRINSIC
+            )
+            print(f"Stereo reprojection error: {ret}")
+            print("Left Camera Matrix:\n", cam_mat_l)
+            print("Right Camera Matrix:\n", cam_mat_r)
+            print("Rotation:\n", R)
+            print("Translation:\n", T)
+            # Save results if needed
+            # Reset lists to avoid repeated calibration
+            stereo_object_points.clear()
+            stereo_image_points_l.clear()
+            stereo_image_points_r.clear()
 
         if key == ord("q"):
             break
