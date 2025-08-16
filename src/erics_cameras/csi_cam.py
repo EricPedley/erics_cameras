@@ -3,7 +3,7 @@ from .camera import Camera
 from enum import Enum
 from pathlib import Path
 import cv2 as cv
-from .types import Image
+from .camera_types import Image
 
 
 class CSICam(Camera):

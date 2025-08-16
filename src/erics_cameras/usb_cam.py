@@ -2,7 +2,7 @@ from .camera import Camera, ImageMetadata
 from .gst_cam import GstCamera
 import time
 from pathlib import Path
-from .types import Image
+from .camera_types import Image
 import cv2 as cv
 from enum import Enum
 import numpy as np

@@ -1,5 +1,5 @@
 from numpy import ndarray
-from .types import Image
+from .camera_types import Image
 from .camera import Camera 
 import numpy as np
 

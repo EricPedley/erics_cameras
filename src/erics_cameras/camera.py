@@ -11,7 +11,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from .types import Image
+from .camera_types import Image
 
 
 class ImageBuffer: 

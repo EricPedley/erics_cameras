@@ -16,7 +16,7 @@ except ModuleNotFoundError:
 
 import threading
 from .camera import Camera
-from .types import Image
+from .camera_types import Image
 
 
 class FrameReader(threading.Thread):
