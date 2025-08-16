@@ -8,6 +8,9 @@ unzip opencv_contrib-4.12.0.zip
 cd opencv-4.12.0
 mkdir build && cd build
 
+PYTHON_INCLUDE=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['include'])")
+PYTHON_PACKAGES=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
+
 cmake -D CMAKE_BUILD_TYPE=RELEASE \
     -D CMAKE_INSTALL_PREFIX=/usr/local \
     -D OPENCV_EXTRA_MODULES_PATH=~/Downloads/opencv_contrib-4.12.0/modules \
@@ -18,8 +21,8 @@ cmake -D CMAKE_BUILD_TYPE=RELEASE \
     -D BUILD_TESTS=OFF \
     -D BUILD_PERF_TESTS=OFF \
     -D PYTHON3_EXECUTABLE=/usr/bin/python3 \
-    -D PYTHON3_INCLUDE_DIR=/usr/include/python3.* \
-    -D PYTHON3_PACKAGES_PATH=/usr/local/lib/python3.*/site-packages \
+    -D PYTHON3_INCLUDE_DIR=$PYTHON_INCLUDE \
+    -D PYTHON3_PACKAGES_PATH=$PYTHON_PACKAGES \
     ..
 
 make -j$(nproc)
