@@ -5,7 +5,7 @@ from typing import NamedTuple
 import numpy as np
 import os
 
-from erics_cameras import Camera, GazeboCamera, USBCam, CSICam, RTSPCamera
+from erics_cameras import Camera, USBCam, CSICam, RTSPCamera
 from time import strftime, time
 from pathlib import Path
 from typing import Any
@@ -15,7 +15,7 @@ import argparse
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Camera calibration script.")
     parser.add_argument(
-        "--cam_type", help="Type of camera to use for calibration.", choices=["0", "1", "2", "3"], default=None
+        "--cam_type", help="Type of camera to use for calibration.", choices=["0", "1", "2"], default=None
     )
 
     class BoardDetectionResults(NamedTuple):
@@ -66,8 +66,7 @@ if __name__ == '__main__':
             Enter camera selection:
             0: usb camera
             1: CSI camera
-            2: gazebo cam
-            3: rtsp cam
+            2: rtsp cam
         """).strip() if not parser.parse_args().cam_type else parser.parse_args().cam_type
         logs_base = Path("logs/nvme")
         time_dir = Path(strftime("%Y-%m-%d_%H-%M"))
@@ -79,9 +78,6 @@ if __name__ == '__main__':
             logs_path = logs_base / "csi" / time_dir
             camera: Camera = CSICam(logs_path, CSICam.ResolutionOption.R4K)
         elif camera_selection == "2":
-            logs_path = logs_base / "gazebo" / time_dir
-            camera = GazeboCamera(logs_path)
-        elif camera_selection == "3":
             logs_path = logs_base / "rtsp" / time_dir
             camera = RTSPCamera(logs_path)
 

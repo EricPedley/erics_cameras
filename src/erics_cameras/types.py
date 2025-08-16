@@ -6,7 +6,6 @@ import cv2
 import numpy as np
 from enum import Enum
 from scipy.spatial.transform import Rotation
-from shared.types import Pose
 
 
 integer = Union[

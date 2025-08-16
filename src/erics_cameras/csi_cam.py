@@ -1,9 +1,9 @@
 from .gst_cam import GstCamera
-from perception.camera.camera import Camera
+from .camera import Camera
 from enum import Enum
 from pathlib import Path
 import cv2 as cv
-from perception.types import Image
+from .types import Image
 
 
 class CSICam(Camera):
