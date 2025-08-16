@@ -71,18 +71,20 @@ if __name__ == '__main__':
         time_dir = Path(strftime("%Y-%m-%d/%H-%M"))
         logs_path = logs_base / time_dir
 
-        pipeline_l = (
-            "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36  ! "
+        pipeline_cam0 = (
+            "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@88000/ov5647@36 ! "
             "video/x-raw,format=BGR,width=1280,height=960,framerate=30/1 ! "
             "videoconvert ! appsink drop=1 max-buffers=1"
         )
-        camera_l = GstCamera(None, pipeline_l)
-        pipeline_r = (
-            "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@88000/ov5647@36  ! "
+
+        pipeline_cam1 = (
+            "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36 ! "
             "video/x-raw,format=BGR,width=1280,height=960,framerate=30/1 ! "
             "videoconvert ! appsink drop=1 max-buffers=1"
         )
-        camera_r = GstCamera(None, pipeline_r)
+
+        cap0 = cv.VideoCapture(pipeline_cam0, cv.CAP_GSTREAMER)
+        cap1 = cv.VideoCapture(pipeline_cam1, cv.CAP_GSTREAMER)
         # camera.start_recording()
         # cv.namedWindow("calib", cv.WINDOW_NORMAL)
         cv.namedWindow("left", cv.WINDOW_NORMAL)
@@ -108,13 +110,19 @@ if __name__ == '__main__':
 
     while True:
         if LIVE:
-            img_l = camera_l.take_image()
-            img_r = camera_r.take_image()
-            if img_l is None or img_r is None:
+            # img_l = camera_l.take_image()
+            # img_r = camera_r.take_image()
+
+            if not (cap0.grab() and cap1.grab()):
+                print("❌ Failed to grab from one or both cameras")
+                continue
+
+            # Decode after pulling both from buffers
+            ret_l, img_bgr_l = cap0.retrieve()
+            ret_r, img_bgr_r = cap1.retrieve()
+            if not ret_l or not ret_r:
                 print("Failed to get image")
                 continue
-            img_bgr_l = img_l.get_array()
-            img_bgr_r = img_r.get_array()
         else:
             if index == len(images):
                 break
@@ -133,6 +141,8 @@ if __name__ == '__main__':
         detection_results_l = BoardDetectionResults(*charuco_detector.detectBoard(img_gray_l))
         detection_results_r = BoardDetectionResults(*charuco_detector.detectBoard(img_gray_r))
 
+        img_avg_reproj_err = None
+        closest_pose_dist = 0 # TODO: refactor. This makes it really hard to keep track of where this variable is scoped
         # Find common IDs between left and right detections
         if (
             detection_results_l.charuco_corners is not None and
@@ -238,7 +248,7 @@ if __name__ == '__main__':
 
 
                 
-            if rvecs is None or tvecs is None :
+            if not ret or rvecs is None or tvecs is None :
                 do_skip_pose = True
             else:
                 combo_vec = np.concatenate((rvecs.squeeze(), tvecs.squeeze()))
