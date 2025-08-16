@@ -90,7 +90,7 @@ if __name__ == '__main__':
 
     index = 0
     imgs_path = logs_path / "calib_imgs"
-    imgs_path.mkdir(exist_ok=True)
+    imgs_path.mkdir(exist_ok=True, parents=True)
     images = sorted(list(imgs_path.glob("*.png")))
 
     det_results: list[BoardDetectionResults] = []
