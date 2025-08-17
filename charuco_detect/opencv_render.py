@@ -24,7 +24,7 @@ class Billboard:
             [size[0], size[1], 0],
             [0, size[1], 0]
         ], dtype=np.float32)
-        world_coords_after_transform =  world_coords_before_transform @ cv2.Rodrigues(rvec)[0].T + tvec
+        world_coords_after_transform =  world_coords_before_transform @ cv2.Rodrigues(rvec)[0].T + tvec.flatten()
         return Billboard(texture, world_coords_after_transform)
 
 
@@ -46,7 +46,7 @@ class OpenCVRenderer:
         assert rvec.shape == (3,1), f'rvec must be shaped (3,1), got {rvec.shape}'
         assert tvec.shape == (3,1), f'tvec must be shaped (3,1), got {tvec.shape}'
 
-        img = np.zeros((*resolution, 3), dtype=np.uint8)
+        img = np.zeros((resolution[1], resolution[0], 3), dtype=np.uint8)
 
         if self.cam_matrix is not None:
             cam_matrix = self.cam_matrix
