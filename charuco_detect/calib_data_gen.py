@@ -140,7 +140,7 @@ def sample_camera_pose_spherical(board_center: np.ndarray = np.array([0, 0, 0]))
     
     return rvec.astype(np.float32), tvec.astype(np.float32)
 
-def generate_monotonic_distortion_coeffs(method='parameterized', max_attempts=100):
+def generate_monotonic_distortion_coeffs(method='rejection_sampling', max_attempts=1000000):
     """
     Generate monotonic radial distortion coefficients k1, k2, k3
     
@@ -160,15 +160,15 @@ def generate_monotonic_distortion_coeffs(method='parameterized', max_attempts=10
         # This guarantees monotonicity by construction
         
         # For fisheye (barrel distortion), start with negative k1
-        k1_base = np.random.uniform(-0.5, -0.1)
+        k1_base = np.random.uniform(-0.3, -0.00)
         
         # Use parameterization that ensures monotonicity
         # The derivative is: 1 + 3*k1*r² + 5*k2*r⁴ + 7*k3*r⁶
         # We can ensure this stays positive by careful parameterization
         
         # Generate additional terms that counteract the negative k1 at higher orders
-        alpha = np.random.uniform(0.1, 0.8)  # Controls the balance
-        beta = np.random.uniform(0.1, 0.5)   # Controls higher order terms
+        alpha = np.random.uniform(0.01, 0.2)  # Controls the balance
+        beta = np.random.uniform(0.01, 0.3)   # Controls higher order terms
         
         # Maximum radius we care about (normalized, typically ≤ 1.0 for fisheye)
         r_max = 1.0
@@ -224,17 +224,18 @@ def generate_monotonic_distortion_coeffs(method='parameterized', max_attempts=10
     elif method == 'rejection_sampling':
         # Method 3: Rejection sampling - generate and test
         
-        for attempt in range(max_attempts):
-            k1 = np.random.uniform(-0.5, -0.1)
-            k2 = np.random.uniform(-0.3, 0.6)  # Broader range
-            k3 = np.random.uniform(-0.1, 0.2)
+        for _attempt in range(max_attempts):
+            k1 = np.random.uniform(-1, 1)
+            k2 = np.random.uniform(-1, 1)  # Broader range
+            k3 = np.random.uniform(-1, 1)
             
             # Test monotonicity at several points
             if is_monotonic(k1, k2, k3):
                 return k1, k2, k3
         
         # Fallback to parameterized method if rejection sampling fails
-        return generate_monotonic_distortion_coeffs('parameterized')
+        raise ValueError('rejection sampling failed')
+        # return generate_monotonic_distortion_coeffs('parameterized')
     
     else:
         raise ValueError(f"Unknown method: {method}")
@@ -243,16 +244,12 @@ def is_monotonic(k1, k2, k3, r_max=1.0, num_test_points=20):
     """
     Test if radial distortion polynomial is monotonic
     
-    Tests the derivative: dr/dρ = 1 + 3*k1*ρ² + 5*k2*ρ⁴ + 7*k3*ρ⁶ > 0
     """
     r_values = np.linspace(0, r_max, num_test_points)
+
+    derivative_values = 2*k1*r_values + 4*k2*r_values**3 + 6*k3*r_values**5
     
-    for r in r_values:
-        derivative = 1 + 3*k1*r**2 + 5*k2*r**4 + 7*k3*r**6
-        if derivative <= 0.01:  # Small margin for numerical stability
-            return False
-    
-    return True
+    return np.all(derivative_values >= 0) or np.all(derivative_values < 0)
 
 def generate_board_pose():
     """Generate random pose for the ChArUco board"""
@@ -278,8 +275,8 @@ def generate_camera_matrices(num_cameras: int = 20):
     
     for _ in range(num_cameras):
         # Base resolution
-        width = ORIG_WIDTH // SCALE_FACTOR
-        height = ORIG_HEIGHT // SCALE_FACTOR
+        width = 1280
+        height = 960
         
         # Focal length range for wide fisheye lenses (shorter focal lengths)
         # For fisheye: focal length typically 0.3-0.8 times image width
@@ -300,16 +297,12 @@ def generate_camera_matrices(num_cameras: int = 20):
         ], dtype=np.float32)
         
         # Fisheye distortion coefficients with monotonicity constraint
-        p1 = np.random.uniform(-0.01, 0.01)  # Tangential distortion
-        p2 = np.random.uniform(-0.01, 0.01)
+        # p1 = np.random.uniform(-0.01, 0.01)  # Tangential distortion
+        # p2 = np.random.uniform(-0.01, 0.01)
         
-        # Generate monotonic radial distortion coefficients k1, k2, k3
-        # Choose method: 'parameterized' (guaranteed), 'constrained_sampling' (fast), 'rejection_sampling' (flexible)
-        method = np.random.choice(['parameterized', 'constrained_sampling', 'rejection_sampling'], 
-                                 p=[0.5, 0.3, 0.2])  # Bias toward guaranteed methods
-        k1, k2, k3 = generate_monotonic_distortion_coeffs(method=method)
+        k1, k2, k3 = generate_monotonic_distortion_coeffs()
         
-        dist_coeffs = np.array([k1, k2, p1, p2, k3], dtype=np.float32)
+        dist_coeffs = np.array([k1, k2, 0, 0, k3], dtype=np.float32)
         
         camera_matrices.append(cam_mat)
         distortion_coefficients_list.append(dist_coeffs)
@@ -576,7 +569,7 @@ def main():
     background_textures = create_background_textures()
     
     print("Generating camera matrices...")
-    camera_matrices, distortion_coefficients_list = generate_camera_matrices()
+    camera_matrices, distortion_coefficients_list = generate_camera_matrices(1000)
     
     if DEBUG:
         cv2.namedWindow('debug', cv2.WINDOW_NORMAL)
