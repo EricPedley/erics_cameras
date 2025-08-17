@@ -394,7 +394,8 @@ Examples:
                         shape,
                         None if flags is None else cam_mat,  # type: ignore
                         None if flags is None else dist_coeffs[:,:last_nonzero_dist_coef_limit],  # type: ignore
-                        flags=flags
+                        flags=flags,
+                        criteria=(cv.TERM_CRITERIA_EPS+cv.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
                     )
                 )
 
