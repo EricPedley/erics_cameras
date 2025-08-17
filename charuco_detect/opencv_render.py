@@ -74,9 +74,12 @@ class OpenCVRenderer:
         self.billboards.append(billboard)
 
     def _draw_texture_on_image(self, img, billboard: Billboard, rvec, tvec, new_cam_mat, inv_distort_maps):
+        # make black pixels have value 1 so they don't get masked out
+        billboard_texture_copy = billboard.texture.copy()
+        billboard_texture_copy[billboard_texture_copy == 0] = 1
         corners_transformed = cv2.projectPoints(billboard.cv_world_coords.astype(np.float32), rvec, tvec, new_cam_mat, np.zeros((1,5)))[0].squeeze()
-        transform = cv2.getPerspectiveTransform(np.array([[0,0], [billboard.texture.shape[1], 0], [billboard.texture.shape[1], billboard.texture.shape[0]], [0, billboard.texture.shape[0]]], dtype=np.float32), corners_transformed)
-        just_the_gate = cv2.warpPerspective(billboard.texture, transform, (img.shape[1], img.shape[0]))
+        transform = cv2.getPerspectiveTransform(np.array([[0,0], [billboard_texture_copy.shape[1], 0], [billboard_texture_copy.shape[1], billboard_texture_copy.shape[0]], [0, billboard_texture_copy.shape[0]]], dtype=np.float32), corners_transformed)
+        just_the_gate = cv2.warpPerspective(billboard_texture_copy, transform, (img.shape[1], img.shape[0]))
         just_the_gate =  cv2.remap(just_the_gate, inv_distort_maps[0], inv_distort_maps[1], cv2.INTER_LINEAR)
         img[just_the_gate > 0] = just_the_gate[just_the_gate > 0]
 

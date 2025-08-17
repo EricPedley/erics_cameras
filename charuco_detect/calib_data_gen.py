@@ -105,15 +105,12 @@ def sample_camera_pose_spherical(board_center: np.ndarray = np.array([0, 0, 0]))
     elev_rad = np.radians(elevation)
     azim_rad = np.radians(azimuth)
     
-    cam_x = distance * np.cos(elev_rad) * np.cos(azim_rad)
-    cam_y = distance * np.cos(elev_rad) * np.sin(azim_rad)
-    cam_z = distance * np.sin(elev_rad)
-    
-    camera_position = np.array([cam_x, cam_y, cam_z]) + board_center
+    cam_offset = Rotation.from_euler('zx', [azim_rad, elev_rad]).apply(np.array([0,0,distance]))
+    camera_position = board_center + cam_offset
     
     # Calculate look-at direction (camera points toward board center with some offset)
     look_at_offset = np.random.normal(0, 0.001,3) * distance  # Small random offset
-    look_at_target = board_center + look_at_offset
+    look_at_target = board_center #+ look_at_offset
     
     # Calculate camera orientation using look-at
     forward = look_at_target - camera_position
@@ -135,7 +132,7 @@ def sample_camera_pose_spherical(board_center: np.ndarray = np.array([0, 0, 0]))
     
     # Create rotation matrix (camera to world)
     # Note: OpenCV uses different convention, so we need to be careful with directions
-    rotation_matrix = np.column_stack([right, -up, -forward])  # Camera convention
+    rotation_matrix = np.column_stack([-right, -up, -forward])  # Camera convention
     
     # Convert to rotation vector
     rvec = cv2.Rodrigues(rotation_matrix)[0].flatten()
@@ -461,8 +458,8 @@ def make_datapoint(charuco_texture, background_textures, camera_matrices, distor
     """Generate a single training datapoint"""
     
     # Image dimensions
-    height = ORIG_HEIGHT // SCALE_FACTOR
-    width = ORIG_WIDTH // SCALE_FACTOR
+    height = 960
+    width = 1280
     
     # Sample camera intrinsics
     cam_idx = np.random.randint(len(camera_matrices))
@@ -522,7 +519,7 @@ def make_datapoint(charuco_texture, background_textures, camera_matrices, distor
         for corner in corners:
             cv2.circle(debug_img, tuple(corner.astype(int)), 3, (0, 255, 0), -1)
         cv2.imshow('debug', debug_img)
-        cv2.waitKey(1)
+        cv2.waitKey(0)
     
     return img, labels
 
