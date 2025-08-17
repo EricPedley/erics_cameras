@@ -72,9 +72,14 @@ class Image(Generic[_UnderlyingImageT]):
     """
 
     def __init__(self, array: _UnderlyingImageT, dim_order: ImageDimensionsOrder = HWC):
-        if not isinstance(array, np.ndarray) and not isinstance(array):
+        if array is None:
             raise TypeError(
-                f"array must be a numpy array or torch tensor. Got {type(array)}"
+                "array cannot be None. Please provide a valid numpy array."
+            )
+        
+        if not isinstance(array, np.ndarray):
+            raise TypeError(
+                f"array must be a numpy array. Got {type(array)}"
             )
 
         if len(array.shape) != 3:

@@ -3,9 +3,10 @@ from pathlib import Path
 from typing import List
 import cv2
 import numpy as np
+import warnings
 
 from .camera import Camera
-from .camera_types import Image
+from .camera_types import Image, HWC
 
 
 class ReplayCamera(Camera):
@@ -123,10 +124,13 @@ class ReplayCamera(Camera):
                 frame = self._take_frame_from_video()
             
             if frame is None:
-                raise RuntimeError(f"Failed to read frame at index {self.current_index}")
+                warnings.warn(f"Failed to read frame at index {self.current_index}, {self.image_files[self.current_index]}")
+                # Skip this frame and try the next one
+                self.current_index += 1
+                return self.take_image()  # Recursively try the next frame
             
             # Create Image object and increment counter
-            image = Image(frame)
+            image = Image(frame, HWC)
             self.current_index += 1
             
             return image

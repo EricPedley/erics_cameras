@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import argparse
+CALIB_BATCH_SIZE = 15
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -177,8 +178,43 @@ Examples:
     last_detection_results = None
 
     while True:
+        def run_calibration(sample_indices: list[int]):
+            calibration_results = CameraCalibrationResults(
+                *cv2.fisheye.calibrate(
+                    [total_object_points[i] for i in sample_indices],
+                    [total_image_points[i] for i in sample_indices],
+                    shape,
+                    None, 
+                    None,
+                    flags=None,
+                    criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
+                )
+            )
+
+            print(f'Reproj error: {calibration_results.repError}')
+            latest_error = calibration_results.repError
+            matrix_outputs = '\n'.join([
+                f'cam_mat = np.array({",".join(str(calibration_results.camMatrix).split())})'.replace('[,','['),
+                '# k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4, Tx, Ty',
+                f'dist_coeffs = np.array({",".join(str(calibration_results.distcoeff).split())})'.replace('[,','[')
+            ])
+            print(matrix_outputs)
+            
+            num_batches = num_total_images_used//CALIB_BATCH_SIZE
+            calib_path = logs_path / 'intrinsics'
+            calib_path.mkdir(exist_ok=True, parents=True)
+
+            with open(f'{calib_path}/{num_batches}.txt', 'w+') as f:
+                f.write(matrix_outputs)
+            cam_mat = calibration_results.camMatrix
+            dist_coeffs = calibration_results.distcoeff
+
         if LIVE:
-            img = camera.take_image()
+            try:
+                img = camera.take_image()
+            except RuntimeError as e:
+                print(f"Live camera exhausted: {e}")
+                break
             if img is None:
                 print("Failed to get image")
                 continue
@@ -364,7 +400,6 @@ Examples:
         if not do_skip_pose and img_avg_reproj_err is not None and img_avg_reproj_err > 1 and len(point_references.object_points) > 4:
             total_object_points.append(point_references.object_points)
             total_image_points.append(point_references.image_points)
-            CALIB_BATCH_SIZE = 15
             num_total_images_used +=1
             is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
             last_image_add_time = time()
@@ -377,6 +412,7 @@ Examples:
 
             if calibration_criteria_met:
                 sample_indices = np.random.choice(np.arange(num_total_images_used), min(60, num_total_images_used))
+                run_calibration(sample_indices)
                 # if num_total_images_used <= CALIB_BATCH_SIZE:
                 #     # flags = None
                 #     flags = cv2.CALIB_FIX_TANGENT_DIST
@@ -387,36 +423,6 @@ Examples:
                 flags = None
                 # For fisheye calibration, we use 4 distortion coefficients
                 last_nonzero_dist_coef_limit = 4
-                calibration_results = CameraCalibrationResults(
-                    *cv2.fisheye.calibrate(
-                        [total_object_points[i] for i in sample_indices],
-                        [total_image_points[i] for i in sample_indices],
-                        shape,
-                        None if flags is None else cam_mat,  # type: ignore
-                        None if flags is None else dist_coeffs[:,:last_nonzero_dist_coef_limit],  # type: ignore
-                        flags=flags,
-                        criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
-                    )
-                )
-
-                print(f'Reproj error: {calibration_results.repError}')
-                latest_error = calibration_results.repError
-                matrix_outputs = '\n'.join([
-                    f'cam_mat = np.array({",".join(str(calibration_results.camMatrix).split())})'.replace('[,','['),
-                    '# k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4, Tx, Ty',
-                    f'dist_coeffs = np.array({",".join(str(calibration_results.distcoeff).split())})'.replace('[,','[')
-                ])
-                print(matrix_outputs)
-                
-                num_batches = num_total_images_used//CALIB_BATCH_SIZE
-                calib_path = logs_path / 'intrinsics'
-                calib_path.mkdir(exist_ok=True, parents=True)
-
-                with open(f'{calib_path}/{num_batches}.txt', 'w+') as f:
-                    f.write(matrix_outputs)
-                cam_mat = calibration_results.camMatrix
-                dist_coeffs = calibration_results.distcoeff
-
                 # OpenCV fisheye functions return different numbers of values depending on version
                 try:
                     new_cam_mat, _ = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
@@ -431,6 +437,7 @@ Examples:
         if key == ord("q"):
             break
     
+    run_calibration(np.arange(num_total_images_used))
     # Cleanup
     if not LIVE and hasattr(camera, 'close'):
         camera.close()
