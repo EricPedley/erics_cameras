@@ -55,9 +55,8 @@ if __name__ == '__main__':
     dist_coeffs = np.zeros((1,5), dtype=np.float32)
 
     DIM = (1280, 960)
-    new_cam_mat, _ = cv.getOptimalNewCameraMatrix(cam_mat, dist_coeffs, DIM, 1, DIM)
-    map1, map2 = cv.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
-    inv_map1, inv_map2 = cv.initInverseRectificationMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
+    new_cam_mat, _ = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+    map1, map2 = cv.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
 
     total_object_points = []
     total_image_points = []
@@ -139,24 +138,22 @@ if __name__ == '__main__':
                 )
             )
 
-            ret, rvecs, tvecs = cv.solvePnP(
+
+            ret, rvecs, tvecs = cv.fisheye.solvePnP(
                 point_references.object_points,
-                point_references.image_points,
+                point_references.image_points.reshape(-1, 1, 2).astype(np.float32),
                 cam_mat,
                 dist_coeffs,
                 flags=cv.SOLVEPNP_IPPE,
             )
             if ret:
-                reproj: np.ndarray = cv.projectPoints(
+                reproj: np.ndarray = cv.fisheye.projectPoints(
                     point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
                 )[0].squeeze()
 
-                image_points = point_references.image_points.squeeze()
-
-
                 img_avg_reproj_err = np.mean(
                     np.linalg.norm(
-                        image_points - reproj, axis=1
+                        point_references.image_points.squeeze() - reproj, axis=1
                     )
                 )
                 
@@ -198,7 +195,7 @@ if __name__ == '__main__':
                         movement_magnitude = np.mean(np.linalg.norm(current_intersecting_point_references.image_points.squeeze() - last_intersection_point_references.image_points.squeeze(), axis=1))
                 last_detection_results = detection_results
 
-                for pt in image_points:
+                for pt in point_references.image_points.squeeze():
                     green_amount = int((1-np.tanh(4*(movement_magnitude-1.5)))/4 *255) if movement_magnitude>1 else 255
                     cv.circle(
                         img_debug, tuple(pt.astype(int)), 7, (255, green_amount, 0), -1
@@ -301,11 +298,11 @@ if __name__ == '__main__':
                 # elif num_total_images_used <= 2*CALIB_BATCH_SIZE:
                 #     flags = None
                 # else:
-                #     flags = None
-                flags = cv.CALIB_FIX_TANGENT_DIST
+                #     flags = cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL 
+                flags = None
                 last_nonzero_dist_coef_limit = max([5]+[i+1 for i in range(5,len(dist_coeffs)) if dist_coeffs[0,i]!=0.0])
                 calibration_results = CameraCalibrationResults(
-                    *cv.calibrateCamera(
+                    *cv.fisheye.calibrate(
                         [total_object_points[i] for i in sample_indices],
                         [total_image_points[i] for i in sample_indices],
                         shape,
@@ -333,9 +330,8 @@ if __name__ == '__main__':
                 cam_mat = calibration_results.camMatrix
                 dist_coeffs = calibration_results.distcoeff
 
-                new_cam_mat, _ = cv.getOptimalNewCameraMatrix(cam_mat, dist_coeffs, DIM, 1, DIM)
-                map1, map2 = cv.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
-                inv_map1, inv_map2 = cv.initInverseRectificationMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
+                new_cam_mat, _ = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+                map1, map2 = cv.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
             if LIVE:
                 cv.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
 
