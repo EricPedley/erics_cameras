@@ -38,8 +38,8 @@ if __name__ == '__main__':
         tvecs: Any
 
 
-    SQUARE_LENGTH = 500
-    MARKER_LENGHT = 300
+    SQUARE_LENGTH = 5
+    MARKER_LENGTH = 3
     NUMBER_OF_SQUARES_VERTICALLY = 11
     NUMBER_OF_SQUARES_HORIZONTALLY = 8
 
@@ -47,12 +47,18 @@ if __name__ == '__main__':
     charuco_board = cv.aruco.CharucoBoard(
         size=(NUMBER_OF_SQUARES_HORIZONTALLY, NUMBER_OF_SQUARES_VERTICALLY),
         squareLength=SQUARE_LENGTH,
-        markerLength=MARKER_LENGHT,
+        markerLength=MARKER_LENGTH,
         dictionary=charuco_marker_dictionary,
     )
 
-    cam_mat = np.array([[1000, 0, 1920 / 2], [0, 1000, 1080 / 2], [0, 0, 1]], dtype=np.float32)
-    dist_coeffs = np.zeros((1,5), dtype=np.float32)
+    cam_mat = np.array([[297.80062345,0.,685.72493754],[0.,298.63865273,451.61133244],[0.,0.,1.,]])
+    # k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4, Tx, Ty
+    dist_coeffs = np.array([[-0.20148179,0.03270111,0.,0.,-0.00211291]])
+
+    matrix_l = cam_mat
+    matrix_r = cam_mat
+    dist_l = dist_coeffs
+    dist_r = dist_coeffs
 
     total_object_points = []
     total_image_points = []
@@ -85,6 +91,8 @@ if __name__ == '__main__':
 
         cap0 = cv.VideoCapture(pipeline_cam0, cv.CAP_GSTREAMER)
         cap1 = cv.VideoCapture(pipeline_cam1, cv.CAP_GSTREAMER)
+        # cap0 = cv.VideoCapture('/home/dpsh/kscalecontroller/pi/left_video.avi')
+        # cap1 = cv.VideoCapture('/home/dpsh/kscalecontroller/pi/right_video.avi')
         # camera.start_recording()
         # cv.namedWindow("calib", cv.WINDOW_NORMAL)
         cv.namedWindow("left", cv.WINDOW_NORMAL)
@@ -120,6 +128,7 @@ if __name__ == '__main__':
             # Decode after pulling both from buffers
             ret_l, img_bgr_l = cap0.retrieve()
             ret_r, img_bgr_r = cap1.retrieve()
+
             if not ret_l or not ret_r:
                 print("Failed to get image")
                 continue
@@ -144,34 +153,35 @@ if __name__ == '__main__':
         img_avg_reproj_err = None
         closest_pose_dist = 0 # TODO: refactor. This makes it really hard to keep track of where this variable is scoped
         # Find common IDs between left and right detections
+
         if (
             detection_results_l.charuco_corners is not None and
             detection_results_r.charuco_corners is not None and
             len(detection_results_l.charuco_corners) > 4 and
-            len(detection_results_r.charuco_corners) > 4
+            len(detection_results_r.charuco_corners) > 4 and
+            len(common_ids := set(ids_l:=detection_results_l.charuco_ids.squeeze().tolist()).intersection(set(ids_r:=detection_results_r.charuco_ids.squeeze().tolist()))) > 4
         ):
-            ids_l = detection_results_l.charuco_ids.squeeze().tolist()
-            ids_r = detection_results_r.charuco_ids.squeeze().tolist()
-            common_ids = set(ids_l) - set(ids_r)
-            if len(common_ids) > 4:
-                # Get corners for common IDs
-                corners_l = np.array([corner for id, corner in zip(ids_l, detection_results_l.charuco_corners) if id in common_ids])
-                corners_r = np.array([corner for id, corner in zip(ids_r, detection_results_r.charuco_corners) if id in common_ids])
-                ids_common = np.array(common_ids).reshape((-1, 1))
+            # Get corners for common IDs
+            corners_l = np.array([corner for id, corner in zip(ids_l, detection_results_l.charuco_corners) if id in common_ids])
+            corners_r = np.array([corner for id, corner in zip(ids_r, detection_results_r.charuco_corners) if id in common_ids])
+            ids_common = np.array(list(common_ids)).reshape((-1, 1))
 
-                point_refs_l = PointReferences(*charuco_board.matchImagePoints(corners_l, ids_common))
-                point_refs_r = PointReferences(*charuco_board.matchImagePoints(corners_r, ids_common))
+            point_refs_l = PointReferences(*charuco_board.matchImagePoints(corners_l, ids_common))
+            point_refs_r = PointReferences(*charuco_board.matchImagePoints(corners_r, ids_common))
 
-                # Add to stereo lists
-                stereo_object_points.append(point_refs_l.object_points)
-                stereo_image_points_l.append(point_refs_l.image_points)
-                stereo_image_points_r.append(point_refs_r.image_points)
+            full_refs_l = PointReferences(*charuco_board.matchImagePoints(np.array(detection_results_l.charuco_corners), np.array(ids_l).reshape((-1,1))))
+            full_refs_r = PointReferences(*charuco_board.matchImagePoints(np.array(detection_results_r.charuco_corners), np.array(ids_r).reshape((-1,1))))
 
-                # Optionally visualize points on debug images
-                for pt in point_refs_l.image_points.squeeze():
-                    cv.circle(img_l_debug, tuple(pt.astype(int)), 5, (0,255,0), -1)
-                for pt in point_refs_r.image_points.squeeze():
-                    cv.circle(img_r_debug, tuple(pt.astype(int)), 5, (0,255,0), -1)
+
+            for pt in full_refs_l.image_points.squeeze():
+                cv.circle(img_l_debug, tuple(pt.astype(int)), 7, (255,0,0), -1)
+            for pt in full_refs_r.image_points.squeeze():
+                cv.circle(img_r_debug, tuple(pt.astype(int)), 7, (255,0,0), -1)
+            # Optionally visualize points on debug images
+            for pt in point_refs_l.image_points.squeeze():
+                cv.circle(img_l_debug, tuple(pt.astype(int)), 5, (0,255,0), -1)
+            for pt in point_refs_r.image_points.squeeze():
+                cv.circle(img_r_debug, tuple(pt.astype(int)), 5, (0,255,0), -1)
 
 
             ret, rvecs, tvecs = cv.solvePnP(
@@ -248,7 +258,7 @@ if __name__ == '__main__':
 
 
                 
-            if not ret or rvecs is None or tvecs is None :
+            if rvecs is None or tvecs is None :
                 do_skip_pose = True
             else:
                 combo_vec = np.concatenate((rvecs.squeeze(), tvecs.squeeze()))
@@ -263,7 +273,7 @@ if __name__ == '__main__':
                 if time() - last_image_add_time < 0.5:
                     do_skip_pose = True
         else:
-            point_references = None
+            point_refs_l = None
             do_skip_pose = True
 
         if LIVE:
@@ -273,7 +283,7 @@ if __name__ == '__main__':
                     text_color = (0, 255, 0)
                 else:
                     text_color = (0, 0, 255)
-            for img in (img_bgr_l, ):
+            for img in (img_l_debug, img_r_debug):
                 cv.rectangle(
                     img,
                     (0,0),
@@ -308,17 +318,22 @@ if __name__ == '__main__':
                     (255,255,255),
                     1,
                 )
-            img_debug = cv.resize(img_bgr_l, (1024, 576))
-            cv.imshow("calib", img_debug)
+            cv.imshow("left", cv.resize(img_l_debug, (1024, 576)))
+            cv.imshow("right", cv.resize(img_r_debug, (1024, 576)))
             key = cv.waitKey(1)
         else:
             key = 1
         shape = img_bgr_l.shape[:2]
-        if not do_skip_pose and img_avg_reproj_err is not None and img_avg_reproj_err > 1 and len(point_references.object_points) > 4:
-            total_object_points.append(point_references.object_points)
-            total_image_points.append(point_references.image_points)
+        if not do_skip_pose and img_avg_reproj_err is not None and img_avg_reproj_err > 1 and point_refs_l is not None and len(point_refs_l.object_points) > 4:
+            total_object_points.append(point_refs_l.object_points)
+            total_image_points.append(point_refs_l.image_points)
             CALIB_BATCH_SIZE = 15
             num_total_images_used +=1
+
+            # Add to stereo lists
+            stereo_object_points.append(point_refs_l.object_points)
+            stereo_image_points_l.append(point_refs_l.image_points)
+            stereo_image_points_r.append(point_refs_r.image_points)
             is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
             last_image_add_time = time()
 
