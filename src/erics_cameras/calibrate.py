@@ -54,6 +54,11 @@ if __name__ == '__main__':
     cam_mat = np.array([[1000, 0, 1920 / 2], [0, 1000, 1080 / 2], [0, 0, 1]], dtype=np.float32)
     dist_coeffs = np.zeros((1,5), dtype=np.float32)
 
+    DIM = (1280, 960)
+    new_cam_mat, _ = cv.getOptimalNewCameraMatrix(cam_mat, dist_coeffs, DIM, 1, DIM)
+    map1, map2 = cv.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
+    inv_map1, inv_map2 = cv.initInverseRectificationMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
+
     total_object_points = []
     total_image_points = []
     num_total_images_used = 0
@@ -72,12 +77,13 @@ if __name__ == '__main__':
             "videoconvert ! appsink drop=1 max-buffers=1"
         )
         camera = GstCamera("./testimages", pipeline)
+        # cap0 = cv.VideoCapture('/home/dpsh/kscalecontroller/pi/left_video.avi')
         # camera.start_recording()
         # cv.namedWindow("calib", cv.WINDOW_NORMAL)
-        cv.namedWindow("charuco_board", cv.WINDOW_NORMAL)
+        # cv.namedWindow("charuco_board", cv.WINDOW_NORMAL)
         # cv.resizeWindow("calib", (1024, 576))
         board_img = cv.cvtColor(cv.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv.ROTATE_90_CLOCKWISE), cv.COLOR_GRAY2BGR)
-        cv.resizeWindow("charuco_board", (1600,900))
+        # cv.resizeWindow("charuco_board", (1600,900))
 
     index = 0
     imgs_path = logs_path / "calib_imgs"
@@ -101,6 +107,7 @@ if __name__ == '__main__':
                 print("Failed to get image")
                 continue
             img_bgr = img.get_array()
+            # ret, img_bgr = cap0.read()
             # cv.imshow("debug", img_bgr)
         else:
             if index == len(images):
@@ -110,11 +117,14 @@ if __name__ == '__main__':
             print(f"Processing image {index}/{len(images)}")
 
         img_debug = img_bgr.copy()
-        # img_debug = img_bgr
 
         img_gray = cv.cvtColor(img_bgr, cv.COLOR_BGR2GRAY)
+        do_undistortion_trickery = dist_coeffs[0][0] != 0
+        img_gray_undistorted = cv.remap(img_gray, map1, map2, cv.INTER_LINEAR, borderMode=cv.BORDER_CONSTANT) if do_undistortion_trickery else img_gray
+        undistorted_debug = cv.cvtColor(img_gray_undistorted, cv.COLOR_GRAY2BGR)
         charuco_detector = cv.aruco.CharucoDetector(charuco_board)
-        detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray))
+        detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray_undistorted))
+
 
         img_avg_reproj_err = None
         closest_pose_dist = None
@@ -129,9 +139,45 @@ if __name__ == '__main__':
                 )
             )
 
+            for pt in point_references.image_points.squeeze():
+                cv.circle(
+                    img_debug, tuple(pt.astype(int)), 7, (255, 0, 0), -1
+                )
+
+            # TODO: re-distort image_points
+            def find_closest(i):
+                p = point_references.image_points[i].squeeze()
+                inaccurate = p.astype(np.uint32)
+                x,y = int(inaccurate[0]), int(inaccurate[1])
+                def dfs(x,y):
+                    neighbors = [
+                        (cost(x+1,y), (x+1, y)),
+                        (cost(x-1,y), (x-1, y)),
+                        (cost(x,y+1), (x, y+1)),
+                        (cost(x,y-1), (x, y-1))
+                    ]
+                    best = min(neighbors)
+                    if cost(x,y) <= best[0]:
+                        return x,y
+                    else:
+                        return dfs(best[1][0], best[1][1])
+                
+                def cost(x,y):
+                    if x<0 or y<0 or x>=img.shape[1] or y>=img.shape[0]:
+                        return float('inf')
+                    diff = np.linalg.norm(inv_map1[y,x] - p)
+                    return diff
+
+                return dfs(x,y)
+
+            re_distorted_image_points = np.array([
+                find_closest(i)
+                for i,p in enumerate(point_references.image_points)
+            ])
+
             ret, rvecs, tvecs = cv.solvePnP(
                 point_references.object_points,
-                point_references.image_points,
+                re_distorted_image_points.reshape(-1, 1, 2).astype(np.float32),
                 cam_mat,
                 dist_coeffs,
                 flags=cv.SOLVEPNP_IPPE,
@@ -141,7 +187,7 @@ if __name__ == '__main__':
                     point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
                 )[0].squeeze()
 
-                image_points = point_references.image_points.squeeze()
+                image_points = re_distorted_image_points.squeeze()
 
 
                 img_avg_reproj_err = np.mean(
@@ -265,6 +311,7 @@ if __name__ == '__main__':
                 )
             img_debug = cv.resize(img_debug, (1024, 576))
             cv.imshow("calib", img_debug)
+            cv.imshow('undistorted', cv.resize(undistorted_debug, (1024, 576)))
             key = cv.waitKey(1)
         else:
             key = 1
@@ -320,6 +367,10 @@ if __name__ == '__main__':
                     f.write(matrix_outputs)
                 cam_mat = calibration_results.camMatrix
                 dist_coeffs = calibration_results.distcoeff
+
+                new_cam_mat, _ = cv.getOptimalNewCameraMatrix(cam_mat, dist_coeffs, DIM, 1, DIM)
+                map1, map2 = cv.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
+                inv_map1, inv_map2 = cv.initInverseRectificationMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
             if LIVE:
                 cv.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
 
