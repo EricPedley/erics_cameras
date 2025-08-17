@@ -51,6 +51,10 @@ Examples:
         "--disable_time_check", help="Disable time check between consecutive images", 
         action="store_true"
     )
+    parser.add_argument(
+        "--calibration_model", help="Calibration model to use: 'normal' (k1,k2,p1,p2,k3) or 'fisheye' (k1,k2,p1,p2)", 
+        choices=["normal", "fisheye"], default="fisheye"
+    )
     
     args = parser.parse_args()
 
@@ -88,17 +92,27 @@ Examples:
     )
 
     cam_mat = np.array([[1000, 0, 1920 / 2], [0, 1000, 1080 / 2], [0, 0, 1]], dtype=np.float32)
-    dist_coeffs = np.zeros((1,4), dtype=np.float32)  # Fisheye uses 4 distortion coefficients
-
-    DIM = (1280, 960)
-    # OpenCV fisheye functions return different numbers of values depending on version
-    try:
-        new_cam_mat, _ = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
-    except ValueError:
-        # Some OpenCV versions return only one value
-        new_cam_mat = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
     
-    map1, map2 = cv2.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv2.CV_16SC2) # type: ignore
+    DIM = (1280, 960)
+    
+    # Initialize distortion coefficients based on calibration model
+    if args.calibration_model == "fisheye":
+        dist_coeffs = np.zeros((1,4), dtype=np.float32)  # Fisheye uses 4 distortion coefficients (k1, k2, p1, p2)
+    else:
+        dist_coeffs = np.zeros((1,5), dtype=np.float32)  # Normal calibration uses 5 distortion coefficients (k1, k2, p1, p2, k3)
+    
+    # Initialize undistortion maps
+    map1, map2 = None, None
+
+    # Set calibration functions based on model
+    if args.calibration_model == "fisheye":
+        calibrate_function = cv2.fisheye.calibrate
+        pnp_function = cv2.fisheye.solvePnP
+        project_function = cv2.fisheye.projectPoints
+    else:
+        calibrate_function = cv2.calibrateCamera
+        pnp_function = cv2.solvePnP
+        project_function = cv2.projectPoints
 
     total_object_points = []
     total_image_points = []
@@ -179,23 +193,49 @@ Examples:
 
     while True:
         def run_calibration(sample_indices: list[int]):
-            calibration_results = CameraCalibrationResults(
-                *cv2.fisheye.calibrate(
-                    [total_object_points[i] for i in sample_indices],
-                    [total_image_points[i] for i in sample_indices],
-                    shape,
-                    None, 
-                    None,
-                    flags=None,
-                    criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
+            print(f"Running {args.calibration_model} calibration with {len(sample_indices)} samples")
+            
+            # Check if we have any valid points to calibrate with
+            if len(total_object_points) == 0 or len(total_image_points) == 0:
+                print("No valid object points or image points collected. Cannot perform calibration.")
+                return
+            
+            object_points_list = [total_object_points[i] for i in sample_indices]
+            image_points_list = [total_image_points[i] for i in sample_indices]
+            
+            # Use the appropriate calibration function
+            if args.calibration_model == "fisheye":
+                calibration_results = CameraCalibrationResults(
+                    *calibrate_function(
+                        object_points_list,
+                        image_points_list,
+                        shape,
+                        None, 
+                        None,
+                        flags=None,
+                        criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
+                    )
                 )
-            )
+                dist_coeffs_comment = "# k1, k2, k3, k4 (fisheye model)"
+            else:
+                calibration_results = CameraCalibrationResults(
+                    *calibrate_function(
+                        object_points_list,
+                        image_points_list,
+                        shape,
+                        None,
+                        None,
+                        flags=cv2.CALIB_FIX_TANGENT_DIST,
+                        criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
+                    )
+                )
+                dist_coeffs_comment = "# k1, k2, p1, p2, k3 (normal model)"
 
             print(f'Reproj error: {calibration_results.repError}')
             latest_error = calibration_results.repError
             matrix_outputs = '\n'.join([
                 f'cam_mat = np.array({",".join(str(calibration_results.camMatrix).split())})'.replace('[,','['),
-                '# k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4, Tx, Ty',
+                dist_coeffs_comment,
                 f'dist_coeffs = np.array({",".join(str(calibration_results.distcoeff).split())})'.replace('[,','[')
             ])
             print(matrix_outputs)
@@ -239,7 +279,13 @@ Examples:
 
         img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         do_undistortion_trickery = dist_coeffs[0][0] != 0
-        img_gray_undistorted = cv2.remap(img_gray, map1, map2, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT) if do_undistortion_trickery else img_gray
+        if do_undistortion_trickery:
+            if args.calibration_model == "fisheye":
+                img_gray_undistorted = cv2.remap(img_gray, map1, map2, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+            else:
+                img_gray_undistorted = cv2.undistort(img_gray, cam_mat, dist_coeffs)
+        else:
+            img_gray_undistorted = img_gray
         undistorted_debug = cv2.cvtColor(img_gray_undistorted, cv2.COLOR_GRAY2BGR)
         charuco_detector = cv2.aruco.CharucoDetector(charuco_board)
         detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray))
@@ -259,7 +305,8 @@ Examples:
             )
 
 
-            ret, rvecs, tvecs = cv2.fisheye.solvePnP(
+            # Use the appropriate PnP and projection functions
+            ret, rvecs, tvecs = pnp_function(
                 point_references.object_points,
                 point_references.image_points.reshape(-1, 1, 2).astype(np.float32),
                 cam_mat,
@@ -267,7 +314,7 @@ Examples:
                 flags=cv2.SOLVEPNP_IPPE,
             )
             if ret:
-                reproj: np.ndarray = cv2.fisheye.projectPoints(
+                reproj: np.ndarray = project_function(
                     point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
                 )[0].squeeze()
 
@@ -423,14 +470,20 @@ Examples:
                 flags = None
                 # For fisheye calibration, we use 4 distortion coefficients
                 last_nonzero_dist_coef_limit = 4
-                # OpenCV fisheye functions return different numbers of values depending on version
-                try:
-                    new_cam_mat, _ = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
-                except ValueError:
-                    # Some OpenCV versions return only one value
-                    new_cam_mat = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
-                
-                map1, map2 = cv2.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv2.CV_16SC2) # type: ignore
+                # Generate undistortion maps based on calibration model
+                if args.calibration_model == "fisheye":
+                    # OpenCV fisheye functions return different numbers of values depending on version
+                    try:
+                        new_cam_mat, _ = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+                    except ValueError:
+                        # Some OpenCV versions return only one value
+                        new_cam_mat = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+                    
+                    map1, map2 = cv2.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv2.CV_16SC2) # type: ignore
+                else:
+                    # For normal calibration, we don't need to pre-generate maps
+                    # cv2.undistort() will handle the undistortion directly
+                    pass
             if LIVE:
                 cv2.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
 
