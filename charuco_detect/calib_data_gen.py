@@ -141,116 +141,34 @@ def sample_camera_pose_spherical(board_center: np.ndarray = np.array([0, 0, 0]))
     
     return rvec.astype(np.float32), tvec.astype(np.float32)
 
-def generate_monotonic_distortion_coeffs(method='rejection_sampling', max_attempts=1000000):
+def generate_fisheye_distortion_coeffs():
     """
-    Generate monotonic radial distortion coefficients k1, k2, k3
+    Generate fisheye distortion coefficients k1, k2, k3, k4
     
-    For the radial distortion function: r_distorted = r_undistorted * (1 + k1*r² + k2*r⁴ + k3*r⁶)
-    We need the derivative dr_distorted/dr_undistorted > 0 for monotonicity
-    
-    Args:
-        method: 'parameterized', 'constrained_sampling', or 'rejection_sampling'
-        max_attempts: Maximum attempts for rejection sampling
+    For fisheye cameras, we use the fisheye distortion model:
+    r_distorted = r_undistorted * (1 + k1*r + k2*r² + k3*r³ + k4*r⁴)
     
     Returns:
-        tuple: (k1, k2, k3) coefficients
+        tuple: (k1, k2, k3, k4) coefficients for fisheye distortion
     """
     
-    if method == 'parameterized':
-        # Method 1: Parameterized approach using sum of squares
-        # This guarantees monotonicity by construction
-        
-        # For fisheye (barrel distortion), start with negative k1
-        k1_base = np.random.uniform(-0.3, -0.00)
-        
-        # Use parameterization that ensures monotonicity
-        # The derivative is: 1 + 3*k1*r² + 5*k2*r⁴ + 7*k3*r⁶
-        # We can ensure this stays positive by careful parameterization
-        
-        # Generate additional terms that counteract the negative k1 at higher orders
-        alpha = np.random.uniform(0.01, 0.2)  # Controls the balance
-        beta = np.random.uniform(0.01, 0.3)   # Controls higher order terms
-        
-        # Maximum radius we care about (normalized, typically ≤ 1.0 for fisheye)
-        r_max = 1.0
-        
-        # Ensure derivative stays positive at r_max
-        # 1 + 3*k1*r_max² + 5*k2*r_max⁴ + 7*k3*r_max⁶ > 0
-        min_compensation = -(1 + 3*k1_base*r_max**2) / (5*r_max**4)
-        
-        k2 = min_compensation + alpha * abs(k1_base)
-        k3 = beta * abs(k1_base) / 10  # Smaller higher-order term
-        
-        return k1_base, k2, k3
+    # Fisheye distortion coefficients typically have these characteristics:
+    # k1: Strong negative value for barrel distortion (fisheye effect)
+    # k2: Positive value to compensate and maintain monotonicity
+    # k3, k4: Smaller values for fine-tuning
     
-    elif method == 'constrained_sampling':
-        # Method 2: Sample in constrained subspace using linear constraints
-        # Based on sufficient conditions for monotonicity
-        
-        k1 = np.random.uniform(-0.5, -0.1)
-        
-        # For strong barrel distortion (k1 < 0), we need k2, k3 to compensate
-        # Test multiple points to ensure monotonicity throughout range
-        r_tests = [0.5, 0.8, 1.0]
-        margin = 0.1
-        
-        # Find minimum compensation needed across all test points
-        min_compensations = []
-        for r_test in r_tests:
-            # At r_test: 1 + 3*k1*r_test² + 5*k2*r_test⁴ + 7*k3*r_test⁶ > margin
-            min_comp = -(1 + 3*k1*r_test**2 - margin)
-            if min_comp > 0:  # Need positive compensation
-                min_compensations.append(min_comp)
-        
-        if not min_compensations:
-            # k1 is not too negative, can use smaller positive compensation
-            target_compensation = 0.1
-        else:
-            target_compensation = max(min_compensations)
-        
-        # Use a safe distribution: bias toward k2 which has lower power
-        k2_weight = np.random.uniform(0.7, 0.95)
-        k3_weight = np.random.uniform(0.05, 0.3)
-        
-        # Solve for k2 first (lower order, more effective)
-        k2 = target_compensation * k2_weight / (5 * 0.8**4)  # Use middle test point
-        k3 = target_compensation * k3_weight / (7 * 0.8**6)
-        
-        # Ensure k2 is positive for fisheye compensation
-        k2 = max(k2, 0.01)
-        k3 = max(k3, -0.05)  # Allow small negative k3
-        
-        return k1, k2, k3
+    # Generate k1 (strong negative for fisheye effect)
+    k1 = np.random.uniform(-0.8, -0.2)
     
-    elif method == 'rejection_sampling':
-        # Method 3: Rejection sampling - generate and test
-        
-        for _attempt in range(max_attempts):
-            k1 = np.random.uniform(-1, 1)
-            k2 = np.random.uniform(-1, 1)  # Broader range
-            k3 = np.random.uniform(-1, 1)
-            
-            # Test monotonicity at several points
-            if is_monotonic(k1, k2, k3):
-                return k1, k2, k3
-        
-        # Fallback to parameterized method if rejection sampling fails
-        raise ValueError('rejection sampling failed')
-        # return generate_monotonic_distortion_coeffs('parameterized')
+    # Generate k2 (positive to compensate k1 and maintain monotonicity)
+    # For fisheye, we want the distortion to be monotonic
+    k2 = np.random.uniform(0.1, 0.6)
     
-    else:
-        raise ValueError(f"Unknown method: {method}")
-
-def is_monotonic(k1, k2, k3, r_max=1.0, num_test_points=20):
-    """
-    Test if radial distortion polynomial is monotonic
+    # Generate k3, k4 (smaller values for fine-tuning)
+    k3 = np.random.uniform(-0.1, 0.1)
+    k4 = np.random.uniform(-0.05, 0.05)
     
-    """
-    r_values = np.linspace(0, r_max, num_test_points)
-
-    derivative_values = 2*k1*r_values + 4*k2*r_values**3 + 6*k3*r_values**5
-    
-    return np.all(derivative_values >= 0) or np.all(derivative_values < 0)
+    return k1, k2, k3, k4
 
 def generate_board_pose():
     """Generate random pose for the ChArUco board"""
@@ -297,13 +215,12 @@ def generate_camera_matrices(num_cameras: int = 20):
             [0, 0, 1]
         ], dtype=np.float32)
         
-        # Fisheye distortion coefficients with monotonicity constraint
-        # p1 = np.random.uniform(-0.01, 0.01)  # Tangential distortion
-        # p2 = np.random.uniform(-0.01, 0.01)
+        # Fisheye distortion coefficients (4x1 instead of 5x1)
+        # No tangential distortion (p1, p2) for fisheye cameras
+        k1, k2, k3, k4 = generate_fisheye_distortion_coeffs()
         
-        k1, k2, k3 = generate_monotonic_distortion_coeffs()
-        
-        dist_coeffs = np.array([k1, k2, 0, 0, k3], dtype=np.float32)
+        # Fisheye distortion coefficients: [k1, k2, k3, k4]
+        dist_coeffs = np.array([k1, k2, k3, k4], dtype=np.float32).reshape(4, 1)
         
         camera_matrices.append(cam_mat)
         distortion_coefficients_list.append(dist_coeffs)
@@ -401,7 +318,6 @@ def make_datapoint(charuco_texture, background_textures, camera_matrices, distor
     cam_idx = np.random.randint(len(camera_matrices))
     cam_matrix = camera_matrices[cam_idx]
     dist_coeffs = distortion_coefficients_list[cam_idx]
-    # dist_coeffs = np.array([0,0,0,0,0], dtype=np.float32)
     
     # Generate board pose
     board_rvec, board_tvec = generate_board_pose()
@@ -444,7 +360,13 @@ def make_datapoint(charuco_texture, background_textures, camera_matrices, distor
         (height, width)
     )
 
-    inv_distort_maps = cv2.initInverseRectificationMap(cam_matrix, dist_coeffs, None, cam_matrix, (width, height), cv2.CV_16SC2) # type: ignore
+    # For fisheye cameras, we need to use fisheye-specific undistortion maps
+    # Create undistortion maps using fisheye functions
+    new_K = cam_matrix.copy()
+    map1, map2 = cv2.fisheye.initUndistortRectifyMap(
+        cam_matrix, dist_coeffs, None, new_K, (width, height), cv2.CV_16SC2
+    )
+    inv_distort_maps = (map1, map2)
     
     # Create YOLO labels
     labels = renderer.get_keypoint_labels(corners, cam_rvec, cam_tvec, (width,height), inv_distort_maps, img_to_render_on=img if DEBUG else None)
@@ -551,72 +473,64 @@ def main():
     if DEBUG:
         cv2.destroyAllWindows()
 
-def test_monotonic_distortion():
-    """Test the monotonic distortion coefficient generation"""
+def test_fisheye_distortion():
+    """Test the fisheye distortion coefficient generation"""
     import matplotlib.pyplot as plt
     
-    print("Testing monotonic distortion coefficient generation...")
+    print("Testing fisheye distortion coefficient generation...")
     
-    methods = ['parameterized', 'constrained_sampling', 'rejection_sampling']
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    # Generate multiple coefficient sets
+    k_sets = []
+    for _ in range(20):
+        k1, k2, k3, k4 = generate_fisheye_distortion_coeffs()
+        k_sets.append((k1, k2, k3, k4))
     
-    for i, method in enumerate(methods):
-        print(f"\nTesting method: {method}")
-        
-        # Generate multiple coefficient sets
-        k_sets = []
-        for _ in range(10):
-            k1, k2, k3 = generate_monotonic_distortion_coeffs(method=method)
-            k_sets.append((k1, k2, k3))
-            
-            # Verify monotonicity
-            assert is_monotonic(k1, k2, k3), f"Non-monotonic coefficients generated: {k1}, {k2}, {k3}"
-        
-        print(f"✓ Generated {len(k_sets)} valid monotonic coefficient sets")
-        
-        # Plot distortion functions
-        r_values = np.linspace(0, 1.0, 100)
-        
-        # Plot distortion function
-        ax1 = axes[0, i]
-        for k1, k2, k3 in k_sets[:5]:  # Plot first 5
-            r_distorted = r_values * (1 + k1*r_values**2 + k2*r_values**4 + k3*r_values**6)
-            ax1.plot(r_values, r_distorted, alpha=0.7)
-        ax1.set_title(f'Distortion Function - {method}')
-        ax1.set_xlabel('r_undistorted')
-        ax1.set_ylabel('r_distorted')
-        ax1.grid(True)
-        
-        # Plot derivative (monotonicity check)
-        ax2 = axes[1, i]
-        for k1, k2, k3 in k_sets[:5]:  # Plot first 5
-            derivative = 1 + 3*k1*r_values**2 + 5*k2*r_values**4 + 7*k3*r_values**6
-            ax2.plot(r_values, derivative, alpha=0.7)
-        ax2.set_title(f'Derivative - {method}')
-        ax2.set_xlabel('r')
-        ax2.set_ylabel('dr_distorted/dr_undistorted')
-        ax2.axhline(y=0, color='red', linestyle='--', alpha=0.5)
-        ax2.grid(True)
-        ax2.set_ylim(-0.1, 2.0)
-        
-        # Print some statistics
-        k1_values = [k[0] for k in k_sets]
-        k2_values = [k[1] for k in k_sets]
-        k3_values = [k[2] for k in k_sets]
-        
-        print(f"  k1 range: [{min(k1_values):.3f}, {max(k1_values):.3f}]")
-        print(f"  k2 range: [{min(k2_values):.3f}, {max(k2_values):.3f}]")
-        print(f"  k3 range: [{min(k3_values):.3f}, {max(k3_values):.3f}]")
+    print(f"✓ Generated {len(k_sets)} fisheye distortion coefficient sets")
+    
+    # Plot distortion functions
+    r_values = np.linspace(0, 1.0, 100)
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    
+    # Plot distortion function
+    for k1, k2, k3, k4 in k_sets[:10]:  # Plot first 10
+        r_distorted = r_values * (1 + k1*r_values + k2*r_values**2 + k3*r_values**3 + k4*r_values**4)
+        ax1.plot(r_values, r_distorted, alpha=0.7)
+    ax1.set_title('Fisheye Distortion Function')
+    ax1.set_xlabel('r_undistorted')
+    ax1.set_ylabel('r_distorted')
+    ax1.grid(True)
+    
+    # Plot derivative (monotonicity check)
+    for k1, k2, k3, k4 in k_sets[:10]:  # Plot first 10
+        derivative = 1 + 2*k1*r_values + 3*k2*r_values**2 + 4*k3*r_values**3 + 5*k4*r_values**4
+        ax2.plot(r_values, derivative, alpha=0.7)
+    ax2.set_title('Derivative')
+    ax2.set_xlabel('r')
+    ax2.set_ylabel('dr_distorted/dr_undistorted')
+    ax2.axhline(y=0, color='red', linestyle='--', alpha=0.5)
+    ax2.grid(True)
+    
+    # Print some statistics
+    k1_values = [k[0] for k in k_sets]
+    k2_values = [k[1] for k in k_sets]
+    k3_values = [k[2] for k in k_sets]
+    k4_values = [k[3] for k in k_sets]
+    
+    print(f"  k1 range: [{min(k1_values):.3f}, {max(k1_values):.3f}]")
+    print(f"  k2 range: [{min(k2_values):.3f}, {max(k2_values):.3f}]")
+    print(f"  k3 range: [{min(k3_values):.3f}, {max(k3_values):.3f}]")
+    print(f"  k4 range: [{min(k4_values):.3f}, {max(k4_values):.3f}]")
     
     plt.tight_layout()
-    plt.savefig('/home/miller/code/erics_cameras/charuco_detect/monotonic_distortion_test.png', dpi=150)
+    plt.savefig('/home/eric/code/erics_cameras/charuco_detect/fisheye_distortion_test.png', dpi=150)
     plt.show()
     
-    print("\n✓ All tests passed! Monotonic distortion coefficient generation is working correctly.")
-    print("Plot saved as 'monotonic_distortion_test.png'")
+    print("\n✓ All tests passed! Fisheye distortion coefficient generation is working correctly.")
+    print("Plot saved as 'fisheye_distortion_test.png'")
 
 if __name__ == '__main__':
-    # Uncomment to test monotonic distortion generation
-    # test_monotonic_distortion()
+    # Uncomment to test fisheye distortion generation
+    # test_fisheye_distortion()
     
     main()

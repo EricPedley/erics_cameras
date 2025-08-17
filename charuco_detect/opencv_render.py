@@ -32,7 +32,7 @@ class OpenCVRenderer:
     def __init__(self, cam_matrix = None, distortion_coeffs = None):
         '''
         cam_matrix is 3x3 and optional, it can be provided at render-time
-        distortion_coeffs is 5x1, 8x1, or 14x1 and optional, it can be provided at render-time
+        distortion_coeffs is 4x1 for fisheye cameras and optional, it can be provided at render-time
         '''
         self.billboards = []
         self.cam_matrix = cam_matrix
@@ -58,11 +58,16 @@ class OpenCVRenderer:
         if distortion_coeffs is None:
             raise ValueError('distortion_coeffs is required either at init or at render-time')
 
-        new_cam_mat, _ = cv2.getOptimalNewCameraMatrix(cam_matrix, distortion_coeffs, (resolution[0], resolution[1]), 1, (resolution[0], resolution[1]))
-        inv_distort_maps = cv2.initInverseRectificationMap(cam_matrix, distortion_coeffs, None, new_cam_mat, (resolution[0], resolution[1]), cv2.CV_16SC2) # type: ignore
+        # For fisheye cameras, we use fisheye-specific undistortion
+        # Create undistortion maps using fisheye functions
+        new_K = cam_matrix.copy()
+        map1, map2 = cv2.fisheye.initUndistortRectifyMap(
+            cam_matrix, distortion_coeffs, None, new_K, resolution, cv2.CV_16SC2
+        )
+        inv_distort_maps = (map1, map2)
 
         for billboard in self.billboards:
-            self._draw_texture_on_image(img, billboard, rvec.astype(np.float32), tvec.astype(np.float32), new_cam_mat, inv_distort_maps)
+            self._draw_texture_on_image(img, billboard, rvec.astype(np.float32), tvec.astype(np.float32), new_K, inv_distort_maps)
 
         return img
 
@@ -84,9 +89,25 @@ class OpenCVRenderer:
         img[just_the_gate > 0] = just_the_gate[just_the_gate > 0]
 
     def get_keypoint_labels(self, points_3d, rvec, tvec, resolution, inv_distort_maps, img_to_render_on=None):
-        grid_proj_inaccurate = cv2.projectPoints(points_3d, rvec, tvec, self.cam_matrix, self.distortion_coeffs)[0].squeeze()
+        # For fisheye cameras, we need to use fisheye projection
+        # First project points using the fisheye camera model
+        grid_proj_inaccurate = cv2.fisheye.projectPoints(
+            points_3d.reshape(-1, 1, 3), 
+            rvec.reshape(3, 1), 
+            tvec.reshape(3, 1), 
+            self.cam_matrix, 
+            self.distortion_coeffs
+        )[0].squeeze()
 
-        grid_proj_undistored = cv2.projectPoints(points_3d, rvec, tvec, self.cam_matrix, np.zeros((1,5)))[0].squeeze()
+        # Project without distortion for reference
+        grid_proj_undistored = cv2.fisheye.projectPoints(
+            points_3d.reshape(-1, 1, 3), 
+            rvec.reshape(3, 1), 
+            tvec.reshape(3, 1), 
+            self.cam_matrix, 
+            np.zeros((4, 1))  # No distortion for reference
+        )[0].squeeze()
+        
         def is_visible(point):
             return point[0] >= 0 and point[0] < resolution[0] and point[1] >= 0 and point[1] < resolution[1]
         
@@ -159,7 +180,9 @@ class OpenCVRenderer:
             elif shape == 'rectangle':
                 center = np.random.uniform(0, 1, 2)
                 size = np.random.uniform(0.1, 0.3, 2)
-                cv2.rectangle(img_copy, [*tuple(((center - size/2)*img.shape[:2]).astype(int)), *tuple(((center + size/2)*img.shape[:2]).astype(int),)], tuple(color), -1)
+                pt1 = ((center - size/2) * img.shape[:2]).astype(int)
+                pt2 = ((center + size/2) * img.shape[:2]).astype(int)
+                cv2.rectangle(img_copy, tuple(pt1), tuple(pt2), tuple(color), -1)
         if np.random.uniform(0,1) < 0.1: # add banding
             color = (204,2,187)
             start = 0
@@ -197,7 +220,8 @@ def main():
     cam_orientation = np.array([0,0,0]).reshape(3,1)
     res = (1000,1000)
     cam_matrix = np.array([[0.2*res[0],0,0.5*res[0]], [0,0.2*res[0],0.5*res[1]], [0,0,1]], dtype=np.float32)
-    distortion_coeffs = np.array([0,0,0,0,0], dtype=np.float32)
+    # Use fisheye distortion coefficients (4x1)
+    distortion_coeffs = np.array([-0.3, 0.2, 0.0, 0.0], dtype=np.float32)
     img = renderer.render_image(res, cam_position, cam_orientation, cam_matrix, distortion_coeffs)
     cv2.imshow('img', img)
     cv2.waitKey(0)
