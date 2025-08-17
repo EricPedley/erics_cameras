@@ -400,8 +400,8 @@ def make_datapoint(charuco_texture, background_textures, camera_matrices, distor
     # Sample camera intrinsics
     cam_idx = np.random.randint(len(camera_matrices))
     cam_matrix = camera_matrices[cam_idx]
-    # dist_coeffs = distortion_coefficients_list[cam_idx]
-    dist_coeffs = np.array([0,0,0,0,0], dtype=np.float32)
+    dist_coeffs = distortion_coefficients_list[cam_idx]
+    # dist_coeffs = np.array([0,0,0,0,0], dtype=np.float32)
     
     # Generate board pose
     board_rvec, board_tvec = generate_board_pose()
