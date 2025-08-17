@@ -10,14 +10,22 @@ class Billboard:
         self.cv_world_coords = cv_world_coords
 
     @staticmethod
-    def from_point_normal_size(texture, point, normal, size):
+    def from_pose_and_size(texture, tvec, rvec, size):
         '''
-        point is (x,y,z)
-        normal is (x,y,z)
+        tvec is 3x1
+        rvec is 3x1
         size is (width, height)
+        When tvec is 0 and rvec is 0, the billboard is centered at the origin, in-line with the image plane (i.e. x-axis facing right, y-axis facing down)
         '''
-        # TODO
-        raise NotImplementedError
+        # figure out corners in world frame
+        world_coords_before_transform = np.array([
+            [0, 0, 0],
+            [size[0], 0, 0],
+            [size[0], size[1], 0],
+            [0, size[1], 0]
+        ], dtype=np.float32)
+        world_coords_after_transform =  world_coords_before_transform @ cv2.Rodrigues(rvec)[0].T + tvec
+        return Billboard(texture, world_coords_after_transform)
 
 
 class OpenCVRenderer:
@@ -54,14 +62,16 @@ class OpenCVRenderer:
         inv_distort_maps = cv2.initInverseRectificationMap(cam_matrix, distortion_coeffs, None, new_cam_mat, (resolution[0], resolution[1]), cv2.CV_16SC2) # type: ignore
 
         for billboard in self.billboards:
-            self._draw_texture_on_image(img, billboard, rvec, tvec, new_cam_mat, inv_distort_maps)
+            self._draw_texture_on_image(img, billboard, rvec.astype(np.float32), tvec.astype(np.float32), new_cam_mat, inv_distort_maps)
+
+        return img
 
     def add_billboard(self, billboard_texture, billboard_cv_world_coords):
         self.billboards.append(Billboard(billboard_texture, billboard_cv_world_coords))
     
-    def add_billboard_from_point_normal_size(self, texture, point, normal, size):
-        billboard = Billboard.from_point_normal_size(texture, point, normal, size)
-        self.add_billboard(billboard)
+    def add_billboard_from_pose_and_size(self, texture, rvec, tvec, size):
+        billboard = Billboard.from_pose_and_size(texture, rvec.astype(np.float32), tvec.astype(np.float32), size)
+        self.billboards.append(billboard)
 
     def _draw_texture_on_image(self, img, billboard: Billboard, rvec, tvec, new_cam_mat, inv_distort_maps):
         corners_transformed = cv2.projectPoints(billboard.cv_world_coords.astype(np.float32), rvec, tvec, new_cam_mat, np.zeros((1,5)))[0].squeeze()
@@ -161,3 +171,27 @@ class OpenCVRenderer:
         img = cv2.GaussianBlur(img, (kernel_size, kernel_size), 0)
 
         return img
+
+def main():
+    renderer = OpenCVRenderer()
+    # create example world with a box that is red, blue, and green 
+    box_red_texture = np.zeros((100,100,3), dtype=np.uint8)
+    box_red_texture[:,:,0] = 255
+    box_blue_texture = np.zeros((100,100,3), dtype=np.uint8)
+    box_blue_texture[:,:,1] = 255
+    box_green_texture = np.zeros((100,100,3), dtype=np.uint8)
+    box_green_texture[:,:,2] = 255
+    renderer.add_billboard_from_pose_and_size(box_red_texture, np.array([0,0,0]), np.array([0,0,1]), (10,10))
+    renderer.add_billboard_from_pose_and_size(box_blue_texture, np.array([0,0,0]), np.array([0,0,1]), (10,10))
+    renderer.add_billboard_from_pose_and_size(box_green_texture, np.array([0,0,0]), np.array([0,0,1]), (10,10))
+    cam_position = np.array([0,0,0]).reshape(3,1)
+    cam_orientation = np.array([0,0,0]).reshape(3,1)
+    cam_matrix = np.array([[20,0,50], [0,20,50], [0,0,1]], dtype=np.float32)
+    distortion_coeffs = np.array([0,0,0,0,0], dtype=np.float32)
+    img = renderer.render_image((100,100), cam_position, cam_orientation, cam_matrix, distortion_coeffs)
+    cv2.imshow('img', img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+if __name__ == '__main__':
+    main()
