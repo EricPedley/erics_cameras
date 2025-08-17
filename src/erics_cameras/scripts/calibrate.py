@@ -1,4 +1,4 @@
-import cv2 as cv
+import cv2
 
 from typing import NamedTuple
 
@@ -78,8 +78,8 @@ Examples:
     NUMBER_OF_SQUARES_VERTICALLY = 11
     NUMBER_OF_SQUARES_HORIZONTALLY = 8
 
-    charuco_marker_dictionary = cv.aruco.getPredefinedDictionary(cv.aruco.DICT_6X6_250)
-    charuco_board = cv.aruco.CharucoBoard(
+    charuco_marker_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
+    charuco_board = cv2.aruco.CharucoBoard(
         size=(NUMBER_OF_SQUARES_HORIZONTALLY, NUMBER_OF_SQUARES_VERTICALLY),
         squareLength=SQUARE_LENGTH,
         markerLength=MARKER_LENGHT,
@@ -92,12 +92,12 @@ Examples:
     DIM = (1280, 960)
     # OpenCV fisheye functions return different numbers of values depending on version
     try:
-        new_cam_mat, _ = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+        new_cam_mat, _ = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
     except ValueError:
         # Some OpenCV versions return only one value
-        new_cam_mat = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+        new_cam_mat = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
     
-    map1, map2 = cv.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
+    map1, map2 = cv2.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv2.CV_16SC2) # type: ignore
 
     total_object_points = []
     total_image_points = []
@@ -117,13 +117,13 @@ Examples:
             "videoconvert ! appsink drop=1 max-buffers=1"
         )
         camera = GstCamera("./testimages", pipeline)
-        # cap0 = cv.VideoCapture('/home/dpsh/kscalecontroller/pi/left_video.avi')
+        # cap0 = cv2.VideoCapture('/home/dpsh/kscalecontroller/pi/left_video.avi')
         # camera.start_recording()
-        cv.namedWindow("calib", cv.WINDOW_NORMAL)
-        cv.namedWindow("charuco_board", cv.WINDOW_NORMAL)
-        cv.resizeWindow("calib", (1024, 576))
-        board_img = cv.cvtColor(cv.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv.ROTATE_90_CLOCKWISE), cv.COLOR_GRAY2BGR)
-        # cv.resizeWindow("charuco_board", (1600,900))
+        cv2.namedWindow("calib", cv2.WINDOW_NORMAL)
+        cv2.namedWindow("charuco_board", cv2.WINDOW_NORMAL)
+        cv2.resizeWindow("calib", (1024, 576))
+        board_img = cv2.cvtColor(cv2.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv2.ROTATE_90_CLOCKWISE), cv2.COLOR_GRAY2BGR)
+        # cv2.resizeWindow("charuco_board", (1600,900))
         
         imgs_path = logs_path / "calib_imgs"
         imgs_path.mkdir(exist_ok=True, parents=True)
@@ -158,7 +158,7 @@ Examples:
         imgs_path.mkdir(exist_ok=True, parents=True)
         
         # Generate board image for display
-        board_img = cv.cvtColor(cv.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv.ROTATE_90_CLOCKWISE), cv.COLOR_GRAY2BGR)
+        board_img = cv2.cvtColor(cv2.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv2.ROTATE_90_CLOCKWISE), cv2.COLOR_GRAY2BGR)
         
     else:
         raise ValueError(f"Invalid source type: {args.source}")
@@ -184,7 +184,7 @@ Examples:
                 continue
             img_bgr = img.get_array()
             # ret, img_bgr = cap0.read()
-            # cv.imshow("debug", img_bgr")
+            # cv2.imshow("debug", img_bgr")
         else:
             # Using ReplayCamera
             try:
@@ -201,11 +201,11 @@ Examples:
 
         img_debug = img_bgr.copy()
 
-        img_gray = cv.cvtColor(img_bgr, cv.COLOR_BGR2GRAY)
+        img_gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         do_undistortion_trickery = dist_coeffs[0][0] != 0
-        img_gray_undistorted = cv.remap(img_gray, map1, map2, cv.INTER_LINEAR, borderMode=cv.BORDER_CONSTANT) if do_undistortion_trickery else img_gray
-        undistorted_debug = cv.cvtColor(img_gray_undistorted, cv.COLOR_GRAY2BGR)
-        charuco_detector = cv.aruco.CharucoDetector(charuco_board)
+        img_gray_undistorted = cv2.remap(img_gray, map1, map2, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT) if do_undistortion_trickery else img_gray
+        undistorted_debug = cv2.cvtColor(img_gray_undistorted, cv2.COLOR_GRAY2BGR)
+        charuco_detector = cv2.aruco.CharucoDetector(charuco_board)
         detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray))
 
 
@@ -223,15 +223,15 @@ Examples:
             )
 
 
-            ret, rvecs, tvecs = cv.fisheye.solvePnP(
+            ret, rvecs, tvecs = cv2.fisheye.solvePnP(
                 point_references.object_points,
                 point_references.image_points.reshape(-1, 1, 2).astype(np.float32),
                 cam_mat,
                 dist_coeffs,
-                flags=cv.SOLVEPNP_IPPE,
+                flags=cv2.SOLVEPNP_IPPE,
             )
             if ret:
-                reproj: np.ndarray = cv.fisheye.projectPoints(
+                reproj: np.ndarray = cv2.fisheye.projectPoints(
                     point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
                 )[0].squeeze()
 
@@ -281,16 +281,16 @@ Examples:
 
                 for pt in point_references.image_points.squeeze():
                     green_amount = int((1-np.tanh(4*(movement_magnitude-1.5)))/4 *255) if movement_magnitude>1 else 255
-                    cv.circle(
+                    cv2.circle(
                         img_debug, tuple(pt.astype(int)), 7, (255, green_amount, 0), -1
                     )
                 for pt in reproj:
                     if np.any(np.isnan(pt)) or np.any(pt<0):
                         continue
                     try:
-                        cv.circle(img_debug, tuple(pt.astype(int)), 5,(0, 0, 255) if img_avg_reproj_err > 1 else (0,255,0),-1)
+                        cv2.circle(img_debug, tuple(pt.astype(int)), 5,(0, 0, 255) if img_avg_reproj_err > 1 else (0,255,0),-1)
                     except:
-                        print("Error in cv circle")
+                        print("Error in cv2 circle")
 
 
                 
@@ -320,44 +320,44 @@ Examples:
                 else:
                     text_color = (0, 0, 255)
             for img in (img_debug, board_img):
-                cv.rectangle(
+                cv2.rectangle(
                     img,
                     (0,0),
                     (180, 50),
                     (0,0,0),
                     -1
                 )
-                cv.putText(
+                cv2.putText(
                     img,
                     f"Reproj Err: {img_avg_reproj_err:.2f}" if img_avg_reproj_err is not None else "Reproj Err: N/A",
                     (5, 15),
-                    cv.FONT_HERSHEY_SIMPLEX,
+                    cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     text_color,
                     1,
                 )
-                cv.putText(
+                cv2.putText(
                     img,
                     f"N good imgs: {num_total_images_used}",
                     (5, 25),
-                    cv.FONT_HERSHEY_SIMPLEX,
+                    cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     (255,255,255),
                     1,
                 )
-                cv.putText(
+                cv2.putText(
                     img,
                     f"Originality: {closest_pose_dist/500:.2f}" if closest_pose_dist is not None else "Originality: N/A",
                     (5, 35),
-                    cv.FONT_HERSHEY_SIMPLEX,
+                    cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     (255,255,255),
                     1,
                 )
-            img_debug = cv.resize(img_debug, (1024, 576))
-            cv.imshow("calib", img_debug)
-            cv.imshow('undistorted', cv.resize(undistorted_debug, (1024, 576)))
-            key = cv.waitKey(1)
+            img_debug = cv2.resize(img_debug, (1024, 576))
+            cv2.imshow("calib", img_debug)
+            cv2.imshow('undistorted', cv2.resize(undistorted_debug, (1024, 576)))
+            key = cv2.waitKey(1)
         else:
             key = 1
         shape = img_bgr.shape[:2]
@@ -379,23 +379,23 @@ Examples:
                 sample_indices = np.random.choice(np.arange(num_total_images_used), min(60, num_total_images_used))
                 # if num_total_images_used <= CALIB_BATCH_SIZE:
                 #     # flags = None
-                #     flags = cv.CALIB_FIX_TANGENT_DIST
+                #     flags = cv2.CALIB_FIX_TANGENT_DIST
                 # elif num_total_images_used <= 2*CALIB_BATCH_SIZE:
                 #     flags = None
                 # else:
-                #     flags = cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL 
+                #     flags = cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_THIN_PRISM_MODEL 
                 flags = None
                 # For fisheye calibration, we use 4 distortion coefficients
                 last_nonzero_dist_coef_limit = 4
                 calibration_results = CameraCalibrationResults(
-                    *cv.fisheye.calibrate(
+                    *cv2.fisheye.calibrate(
                         [total_object_points[i] for i in sample_indices],
                         [total_image_points[i] for i in sample_indices],
                         shape,
                         None if flags is None else cam_mat,  # type: ignore
                         None if flags is None else dist_coeffs[:,:last_nonzero_dist_coef_limit],  # type: ignore
                         flags=flags,
-                        criteria=(cv.TERM_CRITERIA_EPS+cv.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
+                        criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
                     )
                 )
 
@@ -419,14 +419,14 @@ Examples:
 
                 # OpenCV fisheye functions return different numbers of values depending on version
                 try:
-                    new_cam_mat, _ = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+                    new_cam_mat, _ = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
                 except ValueError:
                     # Some OpenCV versions return only one value
-                    new_cam_mat = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+                    new_cam_mat = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
                 
-                map1, map2 = cv.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
+                map1, map2 = cv2.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv2.CV_16SC2) # type: ignore
             if LIVE:
-                cv.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
+                cv2.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
 
         if key == ord("q"):
             break
