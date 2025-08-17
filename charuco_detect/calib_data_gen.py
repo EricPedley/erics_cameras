@@ -220,7 +220,8 @@ def generate_camera_matrices(num_cameras: int = 20):
         k1, k2, k3, k4 = generate_fisheye_distortion_coeffs()
         
         # Fisheye distortion coefficients: [k1, k2, k3, k4]
-        dist_coeffs = np.array([k1, k2, k3, k4], dtype=np.float32).reshape(4, 1)
+        # dist_coeffs = np.array([k1, k2, k3, k4], dtype=np.float32).reshape(4, 1)
+        dist_coeffs = np.array([0,0,0,0], dtype=np.float32).reshape(4, 1)
         
         camera_matrices.append(cam_mat)
         distortion_coefficients_list.append(dist_coeffs)
@@ -360,13 +361,12 @@ def make_datapoint(charuco_texture, background_textures, camera_matrices, distor
         (height, width)
     )
 
-    # For fisheye cameras, we need to use fisheye-specific undistortion maps
-    # Create undistortion maps using fisheye functions
-    new_K = cam_matrix.copy()
-    map1, map2 = cv2.fisheye.initUndistortRectifyMap(
-        cam_matrix, dist_coeffs, None, new_K, (width, height), cv2.CV_16SC2
-    )
-    inv_distort_maps = (map1, map2)
+    # For fisheye cameras, we need to use inverse rectification maps
+    # since there's no built-in inverse function for fisheye
+    from fisheye_utils import create_fisheye_inverse_maps
+    
+    # Generate inverse maps (undistorted -> distorted coordinates)
+    inv_distort_maps = create_fisheye_inverse_maps(cam_matrix, dist_coeffs, (width, height))
     
     # Create YOLO labels
     labels = renderer.get_keypoint_labels(corners, cam_rvec, cam_tvec, (width,height), inv_distort_maps, img_to_render_on=img if DEBUG else None)
@@ -434,6 +434,7 @@ def main():
     
     print("Generating camera matrices...")
     camera_matrices, distortion_coefficients_list = generate_camera_matrices(1000)
+    
     
     if DEBUG:
         cv2.namedWindow('debug', cv2.WINDOW_NORMAL)
