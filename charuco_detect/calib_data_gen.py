@@ -12,7 +12,7 @@ from opencv_render import OpenCVRenderer
 
 sys.setrecursionlimit(10000)
 
-DEBUG = os.getenv('DEBUG', False)
+DEBUG = True#os.getenv('DEBUG', False)
 AUGMENT = False#not DEBUG or bool(os.getenv('AUGMENT', True))
 
 # Image dimensions - using smaller size for faster generation
@@ -27,6 +27,8 @@ SQUARE_LENGTH = 50  # In world units (mm)
 MARKER_LENGTH = 30
 NUMBER_OF_SQUARES_VERTICALLY = 11
 NUMBER_OF_SQUARES_HORIZONTALLY = 8
+board_size_pixels = (800,1100)   # Width,Height for generateImage
+board_margin_pixels = 20
 
 # Create ChArUco board
 charuco_marker_dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250)
@@ -70,8 +72,7 @@ def create_background_textures():
 def generate_charuco_texture():
     """Generate ChArUco board texture"""
     # Generate board image
-    board_size_pixels = (1080, 1920)  # Height, Width for generateImage
-    margin_size = 50
+    margin_size = board_margin_pixels
     
     board_img = charuco_board.generateImage(board_size_pixels, marginSize=margin_size)
     # Convert to BGR for consistency
@@ -84,22 +85,22 @@ def sample_camera_pose_spherical(board_center: np.ndarray = np.array([0, 0, 0]))
     Sample camera pose in spherical coordinates around the ChArUco board
     Biased toward closer distances for better corner detection
     """
-    # Distance: 1cm to 1m, biased toward closer distances
+    # Distance: 1cm to 0.5m, biased toward closer distances
     # Use exponential distribution to bias toward closer distances
-    distance_min = 100.0   # 1cm in mm
-    distance_max = 1000.0  # 1m in mm
+    distance_min = 10.0   # 1cm in mm
+    distance_max = 500.0  # 50cm in mm
     
     # Generate exponential distribution biased toward smaller values
     u = np.random.uniform(0, 1)
     # Inverse transform sampling for exponential-like distribution
-    # distance = distance_min + (distance_max - distance_min) * (1 - np.exp(-3 * u)) / (1 - np.exp(-3))
-    distance=1000
+    distance = distance_min + (distance_max - distance_min) * (1 - np.exp(-3 * u)) / (1 - np.exp(-3))
+    # distance=1000
     
     # Spherical angles
     # Elevation: -60° to +60° (avoid extreme viewing angles)
-    elevation = np.random.uniform(0,0)  # degrees
+    elevation = np.random.uniform(0.1,0.2)  # degrees
     # Azimuth: full 360°
-    azimuth = np.random.uniform(0, 0)  # degrees
+    azimuth = np.random.uniform(0, 360)  # degrees
     
     # Convert spherical to Cartesian (camera position)
     elev_rad = np.radians(elevation)
@@ -313,86 +314,28 @@ def extract_charuco_corners(charuco_texture, board_rvec, board_tvec, cam_rvec, c
     """Extract ChArUco corner positions for YOLO labeling"""
     
     # Get ChArUco board corners in board coordinate system
-    charuco_corners_3d = []
-    charuco_ids = []
-    
-    # ChArUco corners are at intersections of black and white squares
-    # For an 8x11 board, we have (8-1)x(11-1) = 7x10 = 70 internal corners
-    corner_id = 0
-    for row in range(NUMBER_OF_SQUARES_VERTICALLY - 1):  # 10 rows of corners
-        for col in range(NUMBER_OF_SQUARES_HORIZONTALLY - 1):  # 7 cols of corners
-            # Corner position in board coordinates (mm)
-            x = (col + 1) * SQUARE_LENGTH
-            y = (row + 1) * SQUARE_LENGTH
-            z = 0
-            
-            charuco_corners_3d.append([x, y, z])
-            charuco_ids.append(corner_id)
-            corner_id += 1
-    
-    charuco_corners_3d = np.array(charuco_corners_3d, dtype=np.float32)
+    # construct a detector and run it on the texture
+    detector = cv2.aruco.CharucoDetector(charuco_board)
+    corners, ids, _, _ = detector.detectBoard(charuco_texture)
+    # add third dimension to corners
+    corners_3d = np.concatenate([corners.squeeze(), np.zeros((corners.shape[0], 1))], axis=1)
+    # convert to mm
+    corners_3d *= SQUARE_LENGTH * NUMBER_OF_SQUARES_HORIZONTALLY / (board_size_pixels[0])
+    # center the points
+    charuco_corners_3d = corners_3d - np.array([SQUARE_LENGTH * NUMBER_OF_SQUARES_HORIZONTALLY / 2, SQUARE_LENGTH * NUMBER_OF_SQUARES_VERTICALLY / 2, 0])
     
     # Transform corners from board coordinates to world coordinates
     board_rotation = cv2.Rodrigues(board_rvec.reshape(3, 1))[0]
     corners_world = (board_rotation @ charuco_corners_3d.T + board_tvec.reshape(-1, 1)).T
-    
-    # Project to image coordinates
-    corners_image = cv2.projectPoints(
-        corners_world, cam_rvec.reshape(3, 1), cam_tvec.reshape(3, 1), cam_matrix, dist_coeffs
-    )[0].squeeze()
-    
-    # Filter corners that are visible in the image
-    valid_corners = []
-    valid_ids = []
-    
-    height, width = img_shape[:2]
-    
-    for i, corner in enumerate(corners_image):
-        x, y = corner
-        if 0 <= x < width and 0 <= y < height:
-            valid_corners.append([x, y])
-            valid_ids.append(charuco_ids[i])
-    
-    return np.array(valid_corners), valid_ids
 
-def create_yolo_labels(corners, corner_ids, img_shape):
-    """Create YOLO format labels for ChArUco corners"""
-    if len(corners) == 0:
-        return ""
+    # project corners on texture and imshow
+    # if DEBUG:
+    #     for corner in corners.squeeze().astype(np.int32):
+    #         cv2.circle(charuco_texture, tuple(corner), 3, (0, 255, 0), -1)
+    #     cv2.imshow('debug', charuco_texture)
+    #     cv2.waitKey(0)
     
-    height, width = img_shape[:2]
-    
-    # Create bounding box around all corners
-    x_coords = corners[:, 0]
-    y_coords = corners[:, 1]
-    
-    x_min, x_max = np.min(x_coords), np.max(x_coords)
-    y_min, y_max = np.min(y_coords), np.max(y_coords)
-    
-    # Add some padding
-    padding = 20
-    x_min = max(0, x_min - padding)
-    y_min = max(0, y_min - padding)
-    x_max = min(width, x_max + padding)
-    y_max = min(height, y_max + padding)
-    
-    # YOLO bounding box format: center_x, center_y, width, height (normalized)
-    bbox_center_x = (x_min + x_max) / 2 / width
-    bbox_center_y = (y_min + y_max) / 2 / height
-    bbox_width = (x_max - x_min) / width
-    bbox_height = (y_max - y_min) / height
-    
-    # Class 0 for ChArUco board
-    label_parts = [f"0 {bbox_center_x:.6f} {bbox_center_y:.6f} {bbox_width:.6f} {bbox_height:.6f}"]
-    
-    # Add corner keypoints (normalized coordinates)
-    for corner in corners:
-        x_norm = corner[0] / width
-        y_norm = corner[1] / height
-        visibility = 2  # Visible
-        label_parts.append(f"{x_norm:.6f} {y_norm:.6f} {visibility}")
-    
-    return " ".join(label_parts)
+    return corners_world
 
 def augment_image(img: np.ndarray):
     """Apply augmentation effects (from synth_data.py)"""
@@ -457,7 +400,8 @@ def make_datapoint(charuco_texture, background_textures, camera_matrices, distor
     # Sample camera intrinsics
     cam_idx = np.random.randint(len(camera_matrices))
     cam_matrix = camera_matrices[cam_idx]
-    dist_coeffs = distortion_coefficients_list[cam_idx]
+    # dist_coeffs = distortion_coefficients_list[cam_idx]
+    dist_coeffs = np.array([0,0,0,0,0], dtype=np.float32)
     
     # Generate board pose
     board_rvec, board_tvec = generate_board_pose()
@@ -494,24 +438,22 @@ def make_datapoint(charuco_texture, background_textures, camera_matrices, distor
         img = np.zeros((height, width, 3), dtype=np.uint8)
     
     # Extract ChArUco corners for labeling
-    corners, corner_ids = extract_charuco_corners(
+    corners= extract_charuco_corners(
         charuco_texture, board_rvec, board_tvec, 
         cam_rvec, cam_tvec, cam_matrix, dist_coeffs, 
         (height, width)
     )
+
+    inv_distort_maps = cv2.initInverseRectificationMap(cam_matrix, dist_coeffs, None, cam_matrix, (width, height), cv2.CV_16SC2) # type: ignore
     
     # Create YOLO labels
-    labels = create_yolo_labels(corners, corner_ids, (height, width))
+    labels = renderer.get_keypoint_labels(corners, cam_rvec, cam_tvec, (width,height), inv_distort_maps, img_to_render_on=img if DEBUG else None)
     
     # Apply augmentation
     img = augment_image(img)
     
-    if DEBUG and len(corners) > 0:
-        # Visualize corners for debugging
-        debug_img = img.copy()
-        for corner in corners:
-            cv2.circle(debug_img, tuple(corner.astype(int)), 3, (0, 255, 0), -1)
-        cv2.imshow('debug', debug_img)
+    if DEBUG:
+        cv2.imshow('debug', img)
         cv2.waitKey(0)
     
     return img, labels

@@ -83,7 +83,7 @@ class OpenCVRenderer:
         just_the_gate =  cv2.remap(just_the_gate, inv_distort_maps[0], inv_distort_maps[1], cv2.INTER_LINEAR)
         img[just_the_gate > 0] = just_the_gate[just_the_gate > 0]
 
-    def get_keypoint_labels(self, points_3d, rvec, tvec, resolution, inv_distort_maps):
+    def get_keypoint_labels(self, points_3d, rvec, tvec, resolution, inv_distort_maps, img_to_render_on=None):
         grid_proj_inaccurate = cv2.projectPoints(points_3d, rvec, tvec, self.cam_matrix, self.distortion_coeffs)[0].squeeze()
 
         grid_proj_undistored = cv2.projectPoints(points_3d, rvec, tvec, self.cam_matrix, np.zeros((1,5)))[0].squeeze()
@@ -124,6 +124,11 @@ class OpenCVRenderer:
         is_visible_mask = np.array([int(is_visible(p)) for i,p in enumerate(grid_proj)])
         if is_visible_mask.sum() == 0:
             return ''
+
+        if img_to_render_on is not None:
+            for i,p in enumerate(grid_proj):
+                if is_visible(p):
+                    cv2.circle(img_to_render_on, tuple(p.astype(int)), 3, (0, 255, 0), -1)
 
         bbox = cv2.boundingRect(grid_proj.astype(np.float32))
         bbox_xyxy = [bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3]]
