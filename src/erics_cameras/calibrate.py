@@ -55,9 +55,8 @@ if __name__ == '__main__':
     dist_coeffs = np.zeros((1,5), dtype=np.float32)
 
     DIM = (1280, 960)
-    new_cam_mat, _ = cv.getOptimalNewCameraMatrix(cam_mat, dist_coeffs, DIM, 1, DIM)
-    map1, map2 = cv.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
-    inv_map1, inv_map2 = cv.initInverseRectificationMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
+    new_cam_mat, _ = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+    map1, map2 = cv.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
 
     total_object_points = []
     total_image_points = []
@@ -144,55 +143,22 @@ if __name__ == '__main__':
                     img_debug, tuple(pt.astype(int)), 7, (255, 0, 0), -1
                 )
 
-            # TODO: re-distort image_points
-            def find_closest(i):
-                p = point_references.image_points[i].squeeze()
-                inaccurate = p.astype(np.uint32)
-                x,y = int(inaccurate[0]), int(inaccurate[1])
-                def dfs(x,y):
-                    neighbors = [
-                        (cost(x+1,y), (x+1, y)),
-                        (cost(x-1,y), (x-1, y)),
-                        (cost(x,y+1), (x, y+1)),
-                        (cost(x,y-1), (x, y-1))
-                    ]
-                    best = min(neighbors)
-                    if cost(x,y) <= best[0]:
-                        return x,y
-                    else:
-                        return dfs(best[1][0], best[1][1])
-                
-                def cost(x,y):
-                    if x<0 or y<0 or x>=img.shape[1] or y>=img.shape[0]:
-                        return float('inf')
-                    diff = np.linalg.norm(inv_map1[y,x] - p)
-                    return diff
 
-                return dfs(x,y)
-
-            re_distorted_image_points = np.array([
-                find_closest(i)
-                for i,p in enumerate(point_references.image_points)
-            ])
-
-            ret, rvecs, tvecs = cv.solvePnP(
+            ret, rvecs, tvecs = cv.fisheye.solvePnP(
                 point_references.object_points,
-                re_distorted_image_points.reshape(-1, 1, 2).astype(np.float32),
+                point_references.image_points.reshape(-1, 1, 2).astype(np.float32),
                 cam_mat,
                 dist_coeffs,
                 flags=cv.SOLVEPNP_IPPE,
             )
             if ret:
-                reproj: np.ndarray = cv.projectPoints(
+                reproj: np.ndarray = cv.fisheye.projectPoints(
                     point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
                 )[0].squeeze()
 
-                image_points = re_distorted_image_points.squeeze()
-
-
                 img_avg_reproj_err = np.mean(
                     np.linalg.norm(
-                        image_points - reproj, axis=1
+                        point_references.image_points.squeeze() - reproj, axis=1
                     )
                 )
                 
@@ -234,7 +200,7 @@ if __name__ == '__main__':
                         movement_magnitude = np.mean(np.linalg.norm(current_intersecting_point_references.image_points.squeeze() - last_intersection_point_references.image_points.squeeze(), axis=1))
                 last_detection_results = detection_results
 
-                for pt in image_points:
+                for pt in point_references.image_points.squeeze():
                     green_amount = int((1-np.tanh(4*(movement_magnitude-1.5)))/4 *255) if movement_magnitude>1 else 255
                     cv.circle(
                         img_debug, tuple(pt.astype(int)), 7, (255, green_amount, 0), -1
@@ -337,10 +303,10 @@ if __name__ == '__main__':
                 #     flags = cv.CALIB_RATIONAL_MODEL
                 # else:
                 #     flags = cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL 
-                flags = cv.CALIB_FIX_S1_S2_S3_S4
+                flags = None
                 last_nonzero_dist_coef_limit = max([5]+[i+1 for i in range(5,len(dist_coeffs)) if dist_coeffs[0,i]!=0.0])
                 calibration_results = CameraCalibrationResults(
-                    *cv.calibrateCamera(
+                    *cv.fisheye.calibrate(
                         [total_object_points[i] for i in sample_indices],
                         [total_image_points[i] for i in sample_indices],
                         shape,
@@ -368,9 +334,8 @@ if __name__ == '__main__':
                 cam_mat = calibration_results.camMatrix
                 dist_coeffs = calibration_results.distcoeff
 
-                new_cam_mat, _ = cv.getOptimalNewCameraMatrix(cam_mat, dist_coeffs, DIM, 1, DIM)
-                map1, map2 = cv.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
-                inv_map1, inv_map2 = cv.initInverseRectificationMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
+                new_cam_mat, _ = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+                map1, map2 = cv.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
             if LIVE:
                 cv.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
 
