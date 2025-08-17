@@ -123,7 +123,7 @@ if __name__ == '__main__':
         img_gray_undistorted = cv.remap(img_gray, map1, map2, cv.INTER_LINEAR, borderMode=cv.BORDER_CONSTANT) if do_undistortion_trickery else img_gray
         undistorted_debug = cv.cvtColor(img_gray_undistorted, cv.COLOR_GRAY2BGR)
         charuco_detector = cv.aruco.CharucoDetector(charuco_board)
-        detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray_undistorted))
+        detection_results = BoardDetectionResults(*charuco_detector.detectBoard(img_gray))
 
 
         img_avg_reproj_err = None
@@ -139,45 +139,9 @@ if __name__ == '__main__':
                 )
             )
 
-            for pt in point_references.image_points.squeeze():
-                cv.circle(
-                    img_debug, tuple(pt.astype(int)), 7, (255, 0, 0), -1
-                )
-
-            # TODO: re-distort image_points
-            def find_closest(i):
-                p = point_references.image_points[i].squeeze()
-                inaccurate = p.astype(np.uint32)
-                x,y = int(inaccurate[0]), int(inaccurate[1])
-                def dfs(x,y):
-                    neighbors = [
-                        (cost(x+1,y), (x+1, y)),
-                        (cost(x-1,y), (x-1, y)),
-                        (cost(x,y+1), (x, y+1)),
-                        (cost(x,y-1), (x, y-1))
-                    ]
-                    best = min(neighbors)
-                    if cost(x,y) <= best[0]:
-                        return x,y
-                    else:
-                        return dfs(best[1][0], best[1][1])
-                
-                def cost(x,y):
-                    if x<0 or y<0 or x>=img.shape[1] or y>=img.shape[0]:
-                        return float('inf')
-                    diff = np.linalg.norm(inv_map1[y,x] - p)
-                    return diff
-
-                return dfs(x,y)
-
-            re_distorted_image_points = np.array([
-                find_closest(i)
-                for i,p in enumerate(point_references.image_points)
-            ])
-
             ret, rvecs, tvecs = cv.solvePnP(
                 point_references.object_points,
-                re_distorted_image_points.reshape(-1, 1, 2).astype(np.float32),
+                point_references.image_points,
                 cam_mat,
                 dist_coeffs,
                 flags=cv.SOLVEPNP_IPPE,
@@ -187,7 +151,7 @@ if __name__ == '__main__':
                     point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
                 )[0].squeeze()
 
-                image_points = re_distorted_image_points.squeeze()
+                image_points = point_references.image_points.squeeze()
 
 
                 img_avg_reproj_err = np.mean(
@@ -332,12 +296,13 @@ if __name__ == '__main__':
             if calibration_criteria_met:
                 sample_indices = np.random.choice(np.arange(num_total_images_used), min(60, num_total_images_used))
                 # if num_total_images_used <= CALIB_BATCH_SIZE:
-                #     flags = None
+                #     # flags = None
+                #     flags = cv.CALIB_FIX_TANGENT_DIST
                 # elif num_total_images_used <= 2*CALIB_BATCH_SIZE:
-                #     flags = cv.CALIB_RATIONAL_MODEL
+                #     flags = None
                 # else:
-                #     flags = cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL 
-                flags = cv.CALIB_FIX_S1_S2_S3_S4
+                #     flags = None
+                flags = cv.CALIB_FIX_TANGENT_DIST
                 last_nonzero_dist_coef_limit = max([5]+[i+1 for i in range(5,len(dist_coeffs)) if dist_coeffs[0,i]!=0.0])
                 calibration_results = CameraCalibrationResults(
                     *cv.calibrateCamera(
