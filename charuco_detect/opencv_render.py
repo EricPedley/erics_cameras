@@ -61,10 +61,12 @@ class OpenCVRenderer:
         # For fisheye cameras, we use fisheye-specific undistortion
         # Create undistortion maps using fisheye functions
         new_K = cam_matrix.copy()
-        map1, map2 = cv2.fisheye.initUndistortRectifyMap(
-            cam_matrix, distortion_coeffs, None, new_K, resolution, cv2.CV_16SC2
-        )
-        inv_distort_maps = (map1, map2)
+        
+        # Import the utility function
+        from fisheye_utils import create_fisheye_inverse_maps
+        
+        # Generate inverse maps
+        inv_distort_maps = create_fisheye_inverse_maps(cam_matrix, distortion_coeffs, resolution)
 
         for billboard in self.billboards:
             self._draw_texture_on_image(img, billboard, rvec.astype(np.float32), tvec.astype(np.float32), new_K, inv_distort_maps)
@@ -82,7 +84,7 @@ class OpenCVRenderer:
         # make black pixels have value 1 so they don't get masked out
         billboard_texture_copy = billboard.texture.copy()
         billboard_texture_copy[billboard_texture_copy == 0] = 1
-        corners_transformed = cv2.projectPoints(billboard.cv_world_coords.astype(np.float32), rvec, tvec, new_cam_mat, np.zeros((1,5)))[0].squeeze()
+        corners_transformed = cv2.fisheye.projectPoints(billboard.cv_world_coords.astype(np.float32).reshape(-1, 1, 3), rvec, tvec, new_cam_mat, np.zeros((4, 1), dtype=np.float32))[0].squeeze()
         transform = cv2.getPerspectiveTransform(np.array([[0,0], [billboard_texture_copy.shape[1], 0], [billboard_texture_copy.shape[1], billboard_texture_copy.shape[0]], [0, billboard_texture_copy.shape[0]]], dtype=np.float32), corners_transformed)
         just_the_gate = cv2.warpPerspective(billboard_texture_copy, transform, (img.shape[1], img.shape[0]))
         just_the_gate =  cv2.remap(just_the_gate, inv_distort_maps[0], inv_distort_maps[1], cv2.INTER_LINEAR)
@@ -105,7 +107,7 @@ class OpenCVRenderer:
             rvec.reshape(3, 1), 
             tvec.reshape(3, 1), 
             self.cam_matrix, 
-            np.zeros((4, 1))  # No distortion for reference
+            np.zeros((4, 1), dtype=self.cam_matrix.dtype)  # No distortion for reference, same dtype as cam_matrix
         )[0].squeeze()
         
         def is_visible(point):
@@ -137,10 +139,12 @@ class OpenCVRenderer:
             return dfs(x,y)
         
 
-        grid_proj = np.array([
-            find_closest(i) if is_visible(p) and is_visible(grid_proj_inaccurate[i]) else (-1,-1)
-            for i,p in enumerate(grid_proj_undistored)
-        ])
+        # grid_proj = np.array([
+        #     find_closest(i) if is_visible(p) and is_visible(grid_proj_inaccurate[i]) else (-1,-1)
+        #     for i,p in enumerate(grid_proj_undistored)
+        # ])
+
+        grid_proj = grid_proj_inaccurate
 
         is_visible_mask = np.array([int(is_visible(p)) for i,p in enumerate(grid_proj)])
         if is_visible_mask.sum() == 0:
