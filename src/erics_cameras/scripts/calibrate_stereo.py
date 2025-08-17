@@ -1,4 +1,5 @@
 import cv2 as cv
+cv2 = cv # TODO: refactor this garbo style
 
 from typing import NamedTuple
 
@@ -12,7 +13,37 @@ from typing import Any
 
 import argparse
 
+R = np.eye(3)
+t = [0.116,0,0]
+
 if __name__ == '__main__':
+    def compute_relative_pose(rvec1, tvec1, rvec2, tvec2): # llm-generated
+        """
+        Compute the rotation matrix and translation vector between two camera poses.
+        
+        Args:
+            rvec1, tvec1: Rotation vector and translation vector of first pose
+            rvec2, tvec2: Rotation vector and translation vector of second pose
+        
+        Returns:
+            R_rel: 3x3 rotation matrix from pose 1 to pose 2
+            t_rel: 3x1 translation vector from pose 1 to pose 2
+        """
+        # Convert rotation vectors to rotation matrices
+        R1, _ = cv2.Rodrigues(rvec1)
+        R2, _ = cv2.Rodrigues(rvec2)
+        
+        # Ensure tvecs are column vectors
+        tvec1 = tvec1.reshape(3, 1)
+        tvec2 = tvec2.reshape(3, 1)
+        
+        # Compute relative rotation: R_rel = R2 * R1^T
+        R_rel = R2 @ R1.T
+        
+        # Compute relative translation: t_rel = t2 - R_rel * t1
+        t_rel = tvec2 - R_rel @ tvec1
+        
+        return R_rel, t_rel
     parser = argparse.ArgumentParser(description="Camera calibration script.")
     parser.add_argument(
         "--cam_type", help="Type of camera to use for calibration.", choices=["0", "1", "2"], default=None
@@ -184,19 +215,30 @@ if __name__ == '__main__':
                 cv.circle(img_r_debug, tuple(pt.astype(int)), 5, (0,255,0), -1)
 
 
-            ret, rvecs, tvecs = cv.solvePnP(
-                point_refs_l.object_points,
-                point_refs_r.image_points,
+            ret, rvecs_l, tvecs_l = cv.solvePnP(
+                full_refs_l.object_points,
+                full_refs_l.image_points,
                 cam_mat,
                 dist_coeffs,
                 flags=cv.SOLVEPNP_IPPE,
             )
+
+            ret, rvecs_r, tvecs_r = cv.solvePnP(
+                full_refs_r.object_points,
+                full_refs_r.image_points,
+                cam_mat,
+                dist_coeffs,
+                flags=cv.SOLVEPNP_IPPE,
+            )
+
+            R, t = compute_relative_pose(rvecs_l, tvecs_l, rvecs_r, tvecs_r)
+            print(R,t)
             if ret:
                 reproj: np.ndarray = cv.projectPoints(
-                    point_refs_l.object_points, rvecs, tvecs, cam_mat, dist_coeffs
+                    full_refs_l.object_points, rvecs_l, tvecs_l, cam_mat, dist_coeffs
                 )[0].squeeze()
 
-                image_points = point_refs_l.image_points.squeeze()
+                image_points = full_refs_l.image_points.squeeze()
 
 
                 img_avg_reproj_err = np.mean(
@@ -246,22 +288,22 @@ if __name__ == '__main__':
                 for pt in image_points:
                     green_amount = int((1-np.tanh(4*(movement_magnitude-1.5)))/4 *255) if movement_magnitude>1 else 255
                     cv.circle(
-                        img_bgr_l, tuple(pt.astype(int)), 7, (255, green_amount, 0), -1
+                        img_l_debug, tuple(pt.astype(int)), 7, (255, green_amount, 0), -1
                     )
                 for pt in reproj:
                     if np.any(np.isnan(pt)) or np.any(pt<0):
                         continue
                     try:
-                        cv.circle(img_bgr_l, tuple(pt.astype(int)), 5,(0, 0, 255) if img_avg_reproj_err > 1 else (0,255,0),-1)
+                        cv.circle(img_l_debug, tuple(pt.astype(int)), 5,(0, 0, 255) if img_avg_reproj_err > 1 else (0,255,0),-1)
                     except:
                         print("Error in cv circle")
 
 
                 
-            if rvecs is None or tvecs is None :
+            if rvecs_l is None or tvecs_l is None :
                 do_skip_pose = True
             else:
-                combo_vec = np.concatenate((rvecs.squeeze(), tvecs.squeeze()))
+                combo_vec = np.concatenate((rvecs_l.squeeze(), tvecs_l.squeeze()))
                 pose_too_close = pose_circular_buffer_size > 0 and (closest_pose_dist:=np.min(np.linalg.norm(pose_circular_buffer[:pose_circular_buffer_size] - combo_vec.reshape((1,6)), axis=1))) < 500
                 if pose_too_close or movement_magnitude>1:
                     do_skip_pose = True

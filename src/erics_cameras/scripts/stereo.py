@@ -16,8 +16,8 @@ class StereoDepthEstimator:
         self.K2 = cam_mat
         
         # Distortion coefficients (k1, k2, p1, p2, k3)
-        self.dist1 = np.array([0.1, -0.2, 0.0, 0.0, 0.0])
-        self.dist2 = np.array([0.1, -0.2, 0.0, 0.0, 0.0])
+        self.dist1 = dist_coeffs
+        self.dist2 = dist_coeffs
         
         # Extrinsic parameters (Rotation and Translation from camera 1 to camera 2)
         # These represent the transformation from left camera to right camera
