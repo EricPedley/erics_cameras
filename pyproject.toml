@@ -8,6 +8,12 @@ version="1.0.2"
 authors = [{name = "Eric Pedley"}]
 description="Eric's camera library, focused on robotics"
 readme="README.md"
+dependencies = [
+    "opencv-python>=4.12.0.88",
+    "pyyaml>=6.0.2",
+    "scipy>=1.15.3",
+    "tqdm>=4.67.1",
+]
 
 [project.urls]
 source = "https://github.com/EricPedley/erics_cameras"
