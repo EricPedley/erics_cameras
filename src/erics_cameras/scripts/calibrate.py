@@ -5,7 +5,7 @@ from typing import NamedTuple
 import numpy as np
 import os
 
-from erics_cameras import GstCamera
+from erics_cameras import GstCamera, ReplayCamera
 from time import strftime, time
 from pathlib import Path
 from typing import Any
@@ -13,10 +13,45 @@ from typing import Any
 import argparse
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Camera calibration script.")
+    parser = argparse.ArgumentParser(
+        description="Camera calibration script with support for live camera, image folders, and video files.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Live camera calibration (default)
+  python calibrate.py
+  
+  # Calibrate from image folder
+  python calibrate.py --source folder --source_path /path/to/images
+  
+  # Calibrate from video file
+  python calibrate.py --source video --source_path /path/to/video.mp4
+  
+  # Disable motion and time checks for faster processing
+  python calibrate.py --source folder --source_path /path/to/images --disable_motion_check --disable_time_check
+        """
+    )
     parser.add_argument(
         "--cam_type", help="Type of camera to use for calibration.", choices=["0", "1", "2"], default=None
     )
+    parser.add_argument(
+        "--source", help="Source for calibration: 'live', 'folder', or 'video'. If 'folder' or 'video', provide the path.", 
+        choices=["live", "folder", "video"], default="live"
+    )
+    parser.add_argument(
+        "--source_path", help="Path to image folder or video file when using --source folder or video", 
+        type=str, default=None
+    )
+    parser.add_argument(
+        "--disable_motion_check", help="Disable motion check between consecutive images", 
+        action="store_true"
+    )
+    parser.add_argument(
+        "--disable_time_check", help="Disable time check between consecutive images", 
+        action="store_true"
+    )
+    
+    args = parser.parse_args()
 
     class BoardDetectionResults(NamedTuple):
         charuco_corners: Any
@@ -52,10 +87,16 @@ if __name__ == '__main__':
     )
 
     cam_mat = np.array([[1000, 0, 1920 / 2], [0, 1000, 1080 / 2], [0, 0, 1]], dtype=np.float32)
-    dist_coeffs = np.zeros((1,5), dtype=np.float32)
+    dist_coeffs = np.zeros((1,4), dtype=np.float32)  # Fisheye uses 4 distortion coefficients
 
     DIM = (1280, 960)
-    new_cam_mat, _ = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+    # OpenCV fisheye functions return different numbers of values depending on version
+    try:
+        new_cam_mat, _ = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+    except ValueError:
+        # Some OpenCV versions return only one value
+        new_cam_mat = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+    
     map1, map2 = cv.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
 
     total_object_points = []
@@ -63,9 +104,9 @@ if __name__ == '__main__':
     num_total_images_used = 0
     last_image_add_time = time()
 
-    LIVE = bool(os.getenv("LIVE", True))
-
-    if LIVE:
+    # Determine source type and initialize camera
+    if args.source == "live":
+        LIVE = True
         logs_base = Path("logs")
         time_dir = Path(strftime("%Y-%m-%d/%H-%M"))
         logs_path = logs_base / time_dir
@@ -78,16 +119,52 @@ if __name__ == '__main__':
         camera = GstCamera("./testimages", pipeline)
         # cap0 = cv.VideoCapture('/home/dpsh/kscalecontroller/pi/left_video.avi')
         # camera.start_recording()
-        # cv.namedWindow("calib", cv.WINDOW_NORMAL)
-        # cv.namedWindow("charuco_board", cv.WINDOW_NORMAL)
-        # cv.resizeWindow("calib", (1024, 576))
+        cv.namedWindow("calib", cv.WINDOW_NORMAL)
+        cv.namedWindow("charuco_board", cv.WINDOW_NORMAL)
+        cv.resizeWindow("calib", (1024, 576))
         board_img = cv.cvtColor(cv.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv.ROTATE_90_CLOCKWISE), cv.COLOR_GRAY2BGR)
         # cv.resizeWindow("charuco_board", (1600,900))
+        
+        imgs_path = logs_path / "calib_imgs"
+        imgs_path.mkdir(exist_ok=True, parents=True)
+        
+    elif args.source in ["folder", "video"]:
+        LIVE = False
+        if args.source_path is None:
+            raise ValueError(f"--source_path must be provided when using --source {args.source}")
+        
+        # Initialize ReplayCamera
+        camera = ReplayCamera(args.source_path)
+        print(f"Using ReplayCamera with {args.source}: {args.source_path}")
+        print(f"Total frames: {camera.get_total_frames()}")
+        
+        # Display additional info for video files
+        if args.source == "video":
+            video_info = camera.get_video_info()
+            if video_info:
+                print(f"Video info: {video_info['width']}x{video_info['height']} @ {video_info['fps']:.1f} fps")
+                if video_info['duration_seconds']:
+                    print(f"Duration: {video_info['duration_seconds']:.1f} seconds")
+        
+        # Display check status
+        print(f"Motion check: {'enabled' if not args.disable_motion_check else 'disabled'}")
+        print(f"Time check: {'enabled' if not args.disable_time_check else 'disabled'}")
+        
+        # Create logs directory for output
+        logs_base = Path("logs")
+        time_dir = Path(strftime("%Y-%m-%d/%H-%M"))
+        logs_path = logs_base / time_dir
+        imgs_path = logs_path / "calib_imgs"
+        imgs_path.mkdir(exist_ok=True, parents=True)
+        
+        # Generate board image for display
+        board_img = cv.cvtColor(cv.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv.ROTATE_90_CLOCKWISE), cv.COLOR_GRAY2BGR)
+        
+    else:
+        raise ValueError(f"Invalid source type: {args.source}")
 
     index = 0
-    imgs_path = logs_path / "calib_imgs"
-    imgs_path.mkdir(exist_ok=True, parents=True)
-    images = sorted(list(imgs_path.glob("*.png")))
+    images = []  # Not used for ReplayCamera
 
     det_results: list[BoardDetectionResults] = []
 
@@ -107,13 +184,20 @@ if __name__ == '__main__':
                 continue
             img_bgr = img.get_array()
             # ret, img_bgr = cap0.read()
-            # cv.imshow("debug", img_bgr)
+            # cv.imshow("debug", img_bgr")
         else:
-            if index == len(images):
+            # Using ReplayCamera
+            try:
+                img = camera.take_image()
+                if img is None:
+                    print("Failed to get image from ReplayCamera")
+                    break
+                img_bgr = img.get_array()
+                index += 1
+                print(f"Processing frame {index}/{camera.get_total_frames()}")
+            except RuntimeError as e:
+                print(f"ReplayCamera exhausted: {e}")
                 break
-            img_bgr = cv.imread(f"{images[index]}")
-            index += 1
-            print(f"Processing image {index}/{len(images)}")
 
         img_debug = img_bgr.copy()
 
@@ -158,7 +242,7 @@ if __name__ == '__main__':
                 )
                 
                 movement_magnitude=1e9
-                if last_detection_results is not None:
+                if not args.disable_motion_check and last_detection_results is not None:
                     current_ids = [id for id in detection_results.charuco_ids.squeeze().tolist()]
                     last_ids = [id for id in last_detection_results.charuco_ids.squeeze().tolist()]
                     intersecting_ids = [i for i in current_ids if i in last_ids]
@@ -215,14 +299,14 @@ if __name__ == '__main__':
             else:
                 combo_vec = np.concatenate((rvecs.squeeze(), tvecs.squeeze()))
                 pose_too_close = pose_circular_buffer_size > 0 and (closest_pose_dist:=np.min(np.linalg.norm(pose_circular_buffer[:pose_circular_buffer_size] - combo_vec.reshape((1,6)), axis=1))) < 500
-                if pose_too_close or movement_magnitude>1:
+                if pose_too_close or (not args.disable_motion_check and movement_magnitude>1):
                     do_skip_pose = True
                 else:
                     pose_circular_buffer[pose_circular_buffer_index] = combo_vec
                     pose_circular_buffer_index = (pose_circular_buffer_index + 1) % pose_circular_buffer.shape[0]
                     pose_circular_buffer_size = min(pose_circular_buffer_size + 1, pose_circular_buffer.shape[0])
                     do_skip_pose = False
-                if time() - last_image_add_time < 0.5:
+                if not args.disable_time_check and time() - last_image_add_time < 0.5:
                     do_skip_pose = True
         else:
             point_references = None
@@ -288,7 +372,8 @@ if __name__ == '__main__':
             if LIVE:
                 calibration_criteria_met = num_total_images_used >= CALIB_BATCH_SIZE and is_time_to_calib
             else:
-                calibration_criteria_met = index == len(images)
+                # For ReplayCamera, calibrate when we have enough images or when we're at the end
+                calibration_criteria_met = (num_total_images_used >= CALIB_BATCH_SIZE and is_time_to_calib) or (index >= camera.get_total_frames())
 
             if calibration_criteria_met:
                 sample_indices = np.random.choice(np.arange(num_total_images_used), min(60, num_total_images_used))
@@ -300,7 +385,8 @@ if __name__ == '__main__':
                 # else:
                 #     flags = cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL 
                 flags = None
-                last_nonzero_dist_coef_limit = max([5]+[i+1 for i in range(5,len(dist_coeffs)) if dist_coeffs[0,i]!=0.0])
+                # For fisheye calibration, we use 4 distortion coefficients
+                last_nonzero_dist_coef_limit = 4
                 calibration_results = CameraCalibrationResults(
                     *cv.fisheye.calibrate(
                         [total_object_points[i] for i in sample_indices],
@@ -330,10 +416,21 @@ if __name__ == '__main__':
                 cam_mat = calibration_results.camMatrix
                 dist_coeffs = calibration_results.distcoeff
 
-                new_cam_mat, _ = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+                # OpenCV fisheye functions return different numbers of values depending on version
+                try:
+                    new_cam_mat, _ = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+                except ValueError:
+                    # Some OpenCV versions return only one value
+                    new_cam_mat = cv.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+                
                 map1, map2 = cv.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv.CV_16SC2) # type: ignore
             if LIVE:
                 cv.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
 
         if key == ord("q"):
             break
+    
+    # Cleanup
+    if not LIVE and hasattr(camera, 'close'):
+        camera.close()
+        print("ReplayCamera closed successfully.")
