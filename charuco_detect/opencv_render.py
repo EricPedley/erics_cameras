@@ -19,10 +19,10 @@ class Billboard:
         '''
         # figure out corners in world frame
         world_coords_before_transform = np.array([
-            [0, 0, 0],
-            [size[0], 0, 0],
-            [size[0], size[1], 0],
-            [0, size[1], 0]
+            [-size[0]/2, -size[1]/2, 0],
+            [size[0]/2, -size[1]/2, 0],
+            [size[0]/2, size[1]/2, 0],
+            [-size[0]/2, size[1]/2, 0]
         ], dtype=np.float32)
         world_coords_after_transform =  world_coords_before_transform @ cv2.Rodrigues(rvec)[0].T + tvec.flatten()
         return Billboard(texture, world_coords_after_transform)
@@ -70,7 +70,7 @@ class OpenCVRenderer:
         self.billboards.append(Billboard(billboard_texture, billboard_cv_world_coords))
     
     def add_billboard_from_pose_and_size(self, texture, rvec, tvec, size):
-        billboard = Billboard.from_pose_and_size(texture, rvec.astype(np.float32), tvec.astype(np.float32), size)
+        billboard = Billboard.from_pose_and_size(texture, tvec.astype(np.float32), rvec.astype(np.float32), size)
         self.billboards.append(billboard)
 
     def _draw_texture_on_image(self, img, billboard: Billboard, rvec, tvec, new_cam_mat, inv_distort_maps):
@@ -181,14 +181,16 @@ def main():
     box_blue_texture[:,:,1] = 255
     box_green_texture = np.zeros((100,100,3), dtype=np.uint8)
     box_green_texture[:,:,2] = 255
-    renderer.add_billboard_from_pose_and_size(box_red_texture, np.array([0,0,0]), np.array([0,0,1]), (10,10))
-    renderer.add_billboard_from_pose_and_size(box_blue_texture, np.array([0,0,0]), np.array([0,0,1]), (10,10))
-    renderer.add_billboard_from_pose_and_size(box_green_texture, np.array([0,0,0]), np.array([0,0,1]), (10,10))
+    # renderer.add_billboard_from_pose_and_size(box_red_texture, np.array([0,0,0]), np.array([0,0,-2]), (10,10))
+    renderer.add_billboard(box_red_texture, np.array([[-1, 1, 2], [1, 1, 2], [1, -1, 2], [-1, -1, 2]]))
+    renderer.add_billboard_from_pose_and_size(box_blue_texture, np.array([0,0,0]), np.array([0,0,-2]), (0.5,0.5))
+    # renderer.add_billboard_from_pose_and_size(box_green_texture, np.array([0,0,0]), np.array([0,0,-2]), (10,10))
     cam_position = np.array([0,0,0]).reshape(3,1)
     cam_orientation = np.array([0,0,0]).reshape(3,1)
-    cam_matrix = np.array([[20,0,50], [0,20,50], [0,0,1]], dtype=np.float32)
+    res = (1000,1000)
+    cam_matrix = np.array([[0.2*res[0],0,0.5*res[0]], [0,0.2*res[0],0.5*res[1]], [0,0,1]], dtype=np.float32)
     distortion_coeffs = np.array([0,0,0,0,0], dtype=np.float32)
-    img = renderer.render_image((100,100), cam_position, cam_orientation, cam_matrix, distortion_coeffs)
+    img = renderer.render_image(res, cam_position, cam_orientation, cam_matrix, distortion_coeffs)
     cv2.imshow('img', img)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
