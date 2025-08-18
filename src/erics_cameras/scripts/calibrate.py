@@ -28,8 +28,11 @@ Examples:
   # Calibrate from video file
   python calibrate.py --source video --source_path /path/to/video.mp4
   
-  # Disable motion and time checks for faster processing
-  python calibrate.py --source folder --source_path /path/to/images --disable_motion_check --disable_time_check
+          # Disable motion and time checks for faster processing
+        python calibrate.py --source folder --source_path /path/to/images --disable_motion_check --disable_time_check
+        
+        # Enable visualizations when using folder/video source
+        python calibrate.py --source folder --source_path /path/to/images --force_visualization
         """
     )
     parser.add_argument(
@@ -54,6 +57,10 @@ Examples:
     parser.add_argument(
         "--calibration_model", help="Calibration model to use: 'normal' (k1,k2,p1,p2,k3) or 'fisheye' (k1,k2,p1,p2)", 
         choices=["normal", "fisheye"], default="fisheye"
+    )
+    parser.add_argument(
+        "--force_visualization", help="Force enable visualizations even when using folder/video source", 
+        action="store_true"
     )
     
     args = parser.parse_args()
@@ -164,6 +171,7 @@ Examples:
         # Display check status
         print(f"Motion check: {'enabled' if not args.disable_motion_check else 'disabled'}")
         print(f"Time check: {'enabled' if not args.disable_time_check else 'disabled'}")
+        print(f"Visualization: {'enabled' if args.force_visualization else 'disabled'}")
         
         # Create logs directory for output
         logs_base = Path("logs")
@@ -174,6 +182,18 @@ Examples:
         
         # Generate board image for display
         board_img = cv2.cvtColor(cv2.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv2.ROTATE_90_CLOCKWISE), cv2.COLOR_GRAY2BGR)
+        
+        # Create visualization windows if forced
+        if args.force_visualization:
+            try:
+                cv2.namedWindow("calib", cv2.WINDOW_NORMAL)
+                cv2.namedWindow("charuco_board", cv2.WINDOW_NORMAL)
+                cv2.resizeWindow("calib", (1024, 576))
+                print("Visualization windows created successfully")
+            except cv2.error as e:
+                print(f"Warning: Could not create visualization windows: {e}")
+                print("Visualization will be disabled (this is normal in headless environments)")
+                args.force_visualization = False
         
     else:
         raise ValueError(f"Invalid source type: {args.source}")
@@ -210,9 +230,9 @@ Examples:
                         object_points_list,
                         image_points_list,
                         shape,
-                        None, 
-                        None,
-                        flags=None,
+                        np.zeros((3, 3)), 
+                        np.zeros((4, 1)),
+                        flags=cv2.fisheye.CALIB_FIX_SKEW | cv2.fisheye.CALIB_FIX_K4 | cv2.fisheye.CALIB_FIX_K3 | cv2.fisheye.CALIB_FIX_K2 | cv2.fisheye.CALIB_FIX_K1,
                         criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
                     )
                 )
@@ -395,7 +415,7 @@ Examples:
             point_references = None
             do_skip_pose = True
 
-        if LIVE:
+        if LIVE or args.force_visualization:
             text_color = (255,120,0)
             if img_avg_reproj_err is not None:
                 if img_avg_reproj_err < 1:
@@ -484,7 +504,7 @@ Examples:
                     # For normal calibration, we don't need to pre-generate maps
                     # cv2.undistort() will handle the undistortion directly
                     pass
-            if LIVE:
+            if LIVE or args.force_visualization:
                 cv2.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr)
 
         if key == ord("q"):
