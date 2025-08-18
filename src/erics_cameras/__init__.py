@@ -5,3 +5,4 @@ from .usb_cam import USBCam as USBCamera
 from .rtsp_cam import RTSPCamera as RTSPCamera
 from .gst_cam import GstCamera as GstCamera
 from .replay_camera import ReplayCamera as ReplayCamera
+from .libcamera_cam import LibCameraCam as LibCameraCam

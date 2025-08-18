@@ -5,7 +5,7 @@ from typing import NamedTuple
 import numpy as np
 import os
 
-from erics_cameras import GstCamera, ReplayCamera, CSICamera, USBCamera
+from erics_cameras import GstCamera, ReplayCamera, CSICamera, USBCamera, LibCameraCam
 from time import strftime, time
 from pathlib import Path
 from typing import Any
@@ -33,6 +33,12 @@ Examples:
         
         # Enable visualizations when using folder/video source
         python calibrate.py --source folder --source_path /path/to/images --force_visualization
+        
+        # Manual exposure control for live camera
+        python calibrate.py --exposure_mode manual --exposure_time 5000 --gain_mode manual --analogue_gain 2.5
+        
+        # Auto exposure with EV adjustment
+        python calibrate.py --exposure_mode auto --exposure_value -1.0 --brightness 0.2 --contrast 1.2
         """
     )
     acceptable_sources = [
@@ -65,6 +71,10 @@ Examples:
     parser.add_argument(
         "--force_visualization", help="Force enable visualizations even when using folder/video source", 
         action="store_true"
+    )
+    parser.add_argument(
+        "--exposure_mode", help="Exposure mode: 'auto' or 'manual'", 
+        choices=["auto", "manual"], default="auto"
     )
     
     args = parser.parse_args()
@@ -138,12 +148,13 @@ Examples:
         logs_path = logs_base / time_dir
 
         if args.source == "libcamera":
-            pipeline = (
-                "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36  ! "
-                "video/x-raw,format=BGR,width=1280,height=960,framerate=30/1 ! "
-                "videoconvert ! appsink drop=1 max-buffers=1"
+            camera = LibCameraCam(
+                log_dir="./testimages",
+                resolution=LibCameraCam.ResolutionOption.R720P,
+                camera_name="/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36",
+                framerate=30,
+                exposure_mode=LibCameraCam.ExposureMode(args.exposure_mode),
             )
-            camera = GstCamera(None, pipeline)
         elif args.source == "nvargus":
             camera = CSICamera(None)
         elif args.source == "v4l2":
@@ -221,6 +232,21 @@ Examples:
         
         imgs_path = logs_path / "calib_imgs"
         imgs_path.mkdir(exist_ok=True, parents=True)
+        
+        # Display camera settings
+        print("Camera settings:")
+        print(f"  Resolution: {camera._resolution.value}")
+        print(f"  Exposure mode: {args.exposure_mode}")
+        if args.exposure_mode == "manual":
+            print(f"  Exposure time: {args.exposure_time} μs")
+        print(f"  Gain mode: {args.gain_mode}")
+        if args.gain_mode == "manual":
+            print(f"  Analogue gain: {args.analogue_gain}")
+        print(f"  Exposure value: {args.exposure_value}")
+        print(f"  Brightness: {args.brightness}")
+        print(f"  Contrast: {args.contrast}")
+        print(f"  Saturation: {args.saturation}")
+        print(f"  Sharpness: {args.sharpness}")
         
     elif args.source in ["folder", "video"]:
         LIVE = False
