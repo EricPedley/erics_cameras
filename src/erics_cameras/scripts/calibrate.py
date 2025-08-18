@@ -5,7 +5,7 @@ from typing import NamedTuple
 import numpy as np
 import os
 
-from erics_cameras import GstCamera, ReplayCamera
+from erics_cameras import GstCamera, ReplayCamera, CSICamera, USBCamera
 from time import strftime, time
 from pathlib import Path
 from typing import Any
@@ -35,12 +35,16 @@ Examples:
         python calibrate.py --source folder --source_path /path/to/images --force_visualization
         """
     )
+    acceptable_sources = [
+        "folder",
+        "video",
+        "v4l2",
+        "nvargus",
+        "libcamera"
+    ]
     parser.add_argument(
-        "--cam_type", help="Type of camera to use for calibration.", choices=["0", "1", "2"], default=None
-    )
-    parser.add_argument(
-        "--source", help="Source for calibration: 'live', 'folder', or 'video'. If 'folder' or 'video', provide the path.", 
-        choices=["live", "folder", "video"], default="live"
+        "--source", help=f"Source for calibration: {', '.join(acceptable_sources)}. If 'folder' or 'video', provide the path.", 
+        choices=acceptable_sources
     )
     parser.add_argument(
         "--source_path", help="Path to image folder or video file when using --source folder or video", 
@@ -127,20 +131,88 @@ Examples:
     last_image_add_time = time()
 
     # Determine source type and initialize camera
-    if args.source == "live":
+    if args.source in ["v4l2", "nvargus", "libcamera"]:
         LIVE = True
         logs_base = Path("logs")
         time_dir = Path(strftime("%Y-%m-%d/%H-%M"))
         logs_path = logs_base / time_dir
 
-        pipeline = (
-            "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36  ! "
-            "video/x-raw,format=BGR,width=1280,height=960,framerate=30/1 ! "
-            "videoconvert ! appsink drop=1 max-buffers=1"
-        )
-        camera = GstCamera("./testimages", pipeline)
-        # cap0 = cv2.VideoCapture('/home/dpsh/kscalecontroller/pi/left_video.avi')
-        # camera.start_recording()
+        if args.source == "libcamera":
+            pipeline = (
+                "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36  ! "
+                "video/x-raw,format=BGR,width=1280,height=960,framerate=30/1 ! "
+                "videoconvert ! appsink drop=1 max-buffers=1"
+            )
+            camera = GstCamera(None, pipeline)
+        elif args.source == "nvargus":
+            camera = CSICamera(None)
+        elif args.source == "v4l2":
+            camera = USBCamera(None)
+            
+            # Create control window with sliders for camera properties
+            class CameraController:
+                def __init__(self, camera):
+                    self.camera = camera
+                    self.prev_brightness = 50
+                    self.prev_contrast = 50
+                    self.prev_saturation = 50
+                    self.prev_hue = 50
+                    
+                    def nothing(x):
+                        pass
+                        
+                    cv2.namedWindow("Camera Controls", cv2.WINDOW_NORMAL)
+                    cv2.resizeWindow("Camera Controls", (400, 300))
+                    
+                    # Create trackbars for camera properties
+                    cv2.createTrackbar("Brightness", "Camera Controls", 0, 100, nothing)
+                    cv2.createTrackbar("Contrast", "Camera Controls", 0, 100, nothing)
+                    cv2.createTrackbar("Saturation", "Camera Controls", 0, 100, nothing)
+                    cv2.createTrackbar("Hue", "Camera Controls", 0, 100, nothing)
+                    
+                    # Set initial values to middle (50)
+                    cv2.setTrackbarPos("Brightness", "Camera Controls", 50)
+                    cv2.setTrackbarPos("Contrast", "Camera Controls", 50)
+                    cv2.setTrackbarPos("Saturation", "Camera Controls", 50)
+                    cv2.setTrackbarPos("Hue", "Camera Controls", 50)
+                
+                def update_properties(self):
+                    brightness = cv2.getTrackbarPos("Brightness", "Camera Controls")
+                    contrast = cv2.getTrackbarPos("Contrast", "Camera Controls")
+                    saturation = cv2.getTrackbarPos("Saturation", "Camera Controls")
+                    hue = cv2.getTrackbarPos("Hue", "Camera Controls")
+                    
+                    # Check if any value changed
+                    if (brightness != self.prev_brightness or contrast != self.prev_contrast or 
+                        saturation != self.prev_saturation or hue != self.prev_hue):
+                        
+                        # Convert 0-100 range to v4l2 range (-2147483648 to 2147483647)
+                        # Map 0-100 to -100 to 100 for reasonable values
+                        brightness_v4l2 = int((brightness - 50) * 2)
+                        contrast_v4l2 = int((contrast - 50) * 2)
+                        saturation_v4l2 = int((saturation - 50) * 2)
+                        hue_v4l2 = int((hue - 50) * 2)
+                        
+                        print(f"Updating camera properties: B={brightness_v4l2}, C={contrast_v4l2}, S={saturation_v4l2}, H={hue_v4l2}")
+                        
+                        # Update camera properties
+                        success = self.camera.update_properties(
+                            brightness=brightness_v4l2,
+                            contrast=contrast_v4l2,
+                            saturation=saturation_v4l2,
+                            hue=hue_v4l2
+                        )
+                        
+                        if success:
+                            self.prev_brightness = brightness
+                            self.prev_contrast = contrast
+                            self.prev_saturation = saturation
+                            self.prev_hue = hue
+                        else:
+                            print("Failed to update camera properties")
+            
+            # Create camera controller
+            camera_controller = CameraController(camera)
         cv2.namedWindow("calib", cv2.WINDOW_NORMAL)
         cv2.namedWindow("charuco_board", cv2.WINDOW_NORMAL)
         cv2.resizeWindow("calib", (1024, 576))
@@ -462,6 +534,10 @@ Examples:
             cv2.imshow("calib", img_debug)
             cv2.imshow('undistorted', cv2.resize(undistorted_debug, (1024, 576)))
             key = cv2.waitKey(1)
+            
+            # Update camera properties if using v4l2 source
+            if args.source == "v4l2" and 'camera_controller' in locals():
+                camera_controller.update_properties()
         else:
             key = 1
         shape = img_bgr.shape[:2]
@@ -512,3 +588,8 @@ Examples:
     if not LIVE and hasattr(camera, 'close'):
         camera.close()
         print("ReplayCamera closed successfully.")
+    
+    # Cleanup camera control window if it exists
+    if args.source == "v4l2" and 'camera_controller' in locals():
+        cv2.destroyWindow("Camera Controls")
+        print("Camera control window closed.")
