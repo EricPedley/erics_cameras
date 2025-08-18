@@ -98,15 +98,15 @@ Examples:
         dictionary=charuco_marker_dictionary,
     )
 
-    cam_mat = np.array([[260, 0, 1280 / 2], [0, 260, 960 / 2], [0, 0, 1]], dtype=np.float32)
-    
+    cam_mat = np.array([[266.61728276,0.,643.83126137],[0.,266.94450686,494.81811813],[0.,0.,1.,]])
+    # k1, k2, p1, p2, k3 (normal model)
     DIM = (1280, 960)
     
     # Initialize distortion coefficients based on calibration model
     if args.calibration_model == "fisheye":
         dist_coeffs = np.zeros((1,4), dtype=np.float32)  # Fisheye uses 4 distortion coefficients (k1, k2, p1, p2)
     else:
-        dist_coeffs = np.zeros((1,5), dtype=np.float32)  # Normal calibration uses 5 distortion coefficients (k1, k2, p1, p2, k3)
+        dist_coeffs = np.array([[-6.07417419e-02,9.95447444e-02,-2.26448001e-04,1.22881804e-03,3.42134205e-03,1.45361886e-01,8.03248099e-02,2.11170107e-02,-3.80620047e-03,2.48350591e-05,-8.33565666e-04,2.97806723e-05]])
     
     # Initialize undistortion maps
     map1, map2 = None, None
@@ -246,7 +246,7 @@ Examples:
                         shape,
                         None,
                         None,
-                        flags=cv2.CALIB_FIX_TANGENT_DIST,
+                        flags=cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_THIN_PRISM_MODEL,
                         criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
                     )
                 )
