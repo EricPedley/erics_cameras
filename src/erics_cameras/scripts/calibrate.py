@@ -98,7 +98,7 @@ Examples:
         dictionary=charuco_marker_dictionary,
     )
 
-    cam_mat = np.array([[1000, 0, 1920 / 2], [0, 1000, 1080 / 2], [0, 0, 1]], dtype=np.float32)
+    cam_mat = np.array([[260, 0, 1280 / 2], [0, 260, 960 / 2], [0, 0, 1]], dtype=np.float32)
     
     DIM = (1280, 960)
     
@@ -213,6 +213,7 @@ Examples:
 
     while True:
         def run_calibration(sample_indices: list[int]):
+            global cam_mat
             print(f"Running {args.calibration_model} calibration with {len(sample_indices)} samples")
             
             # Check if we have any valid points to calibrate with
@@ -230,9 +231,9 @@ Examples:
                         object_points_list,
                         image_points_list,
                         shape,
-                        np.zeros((3, 3)), 
+                        cam_mat, 
                         np.zeros((4, 1)),
-                        flags=cv2.fisheye.CALIB_FIX_SKEW | cv2.fisheye.CALIB_FIX_K4 | cv2.fisheye.CALIB_FIX_K3 | cv2.fisheye.CALIB_FIX_K2 | cv2.fisheye.CALIB_FIX_K1,
+                        flags=cv2.fisheye.CALIB_FIX_SKEW,
                         criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
                     )
                 )
@@ -493,11 +494,7 @@ Examples:
                 # Generate undistortion maps based on calibration model
                 if args.calibration_model == "fisheye":
                     # OpenCV fisheye functions return different numbers of values depending on version
-                    try:
-                        new_cam_mat, _ = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
-                    except ValueError:
-                        # Some OpenCV versions return only one value
-                        new_cam_mat = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
+                    new_cam_mat = cv2.fisheye.estimateNewCameraMatrixForUndistortRectify(cam_mat, dist_coeffs, DIM, None, None)
                     
                     map1, map2 = cv2.fisheye.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, DIM, cv2.CV_16SC2) # type: ignore
                 else:
