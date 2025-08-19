@@ -28,11 +28,20 @@ cap1 = cv2.VideoCapture(pipeline_cam1, cv2.CAP_GSTREAMER)
 width, height, fps = 1280, 960, 45
 
 gst_str = (
-    f'appsrc ! videoconvert ! video/x-raw,format=BGR,width={width},height={height},framerate={fps}/1 '
-    '! shmsink socket-path=/tmp/video_pipe sync=false wait-for-connection=false shm-size=10000000'
+    f'appsrc ! videoconvert ! video/x-raw,format=I420,width={width},height={height},framerate={fps}/1 '
+    '! queue max-size-buffers=2 leaky=downstream '
+    '! shmsink socket-path=/tmp/video_pipe sync=false wait-for-connection=false shm-size=20000000'
 )
 
-# read with gst-launch-1.0 shmsrc socket-path=/tmp/video_pipe do-timestamp=true ! video/x-raw,format=BGR,width=1280,height=960,framerate=45/1 ! videoconvert ! autovideosink
+
+
+
+'''
+read with this command
+gst-launch-1.0 shmsrc socket-path=/tmp/video_pipe do-timestamp=true ! \
+    video/x-raw,format=I420,width=1280,height=960,framerate=45/1 ! \
+    videoconvert ! autovideosink sync=false
+'''
 
 
 writer = cv2.VideoWriter(gst_str, cv2.CAP_GSTREAMER, 0, fps, (width, height), True)
