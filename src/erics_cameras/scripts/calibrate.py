@@ -78,11 +78,6 @@ Examples:
     )
 
     parser.add_argument(
-        "--exposure_value", help="Exposure value (EV) adjustment for auto exposure",
-        type=int, default=10000
-    )
-
-    parser.add_argument(
         "--gain_mode", help="Gain mode: 'auto' or 'manual'", 
         choices=["auto", "manual"], default="auto"
     )
@@ -242,21 +237,6 @@ Examples:
         
         imgs_path = logs_path / "calib_imgs"
         imgs_path.mkdir(exist_ok=True, parents=True)
-        
-        # Display camera settings
-        print("Camera settings:")
-        print(f"  Resolution: {camera._resolution.value}")
-        print(f"  Exposure mode: {args.exposure_mode}")
-        if args.exposure_mode == "manual":
-            print(f"  Exposure time: {args.exposure_time} μs")
-        print(f"  Gain mode: {args.gain_mode}")
-        if args.gain_mode == "manual":
-            print(f"  Analogue gain: {args.analogue_gain}")
-        print(f"  Exposure value: {args.exposure_value}")
-        print(f"  Brightness: {args.brightness}")
-        print(f"  Contrast: {args.contrast}")
-        print(f"  Saturation: {args.saturation}")
-        print(f"  Sharpness: {args.sharpness}")
         
     elif args.source in ["folder", "video"]:
         LIVE = False
