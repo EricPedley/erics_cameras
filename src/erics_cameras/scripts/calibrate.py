@@ -76,6 +76,11 @@ Examples:
         "--exposure_mode", help="Exposure mode: 'auto' or 'manual'", 
         choices=["auto", "manual"], default="auto"
     )
+
+    parser.add_argument(
+        "--gain_mode", help="Gain mode: 'auto' or 'manual'", 
+        choices=["auto", "manual"], default="auto"
+    )
     
     args = parser.parse_args()
 
