@@ -32,8 +32,9 @@ async def stream_cameras(session: VuerSession, left_src=0, right_src=1):
             continue
         frame_left_rgb = cv2.cvtColor(frame_left, cv2.COLOR_BGR2RGB)
         frame_right_rgb = cv2.cvtColor(frame_right, cv2.COLOR_BGR2RGB)
-        frame_left_rgb = cv2.remap(frame_left_rgb, map1, map2, cv2.INTER_LINEAR)
-        frame_right_rgb = cv2.remap(frame_right_rgb, map1, map2, cv2.INTER_LINEAR)
+        frame_left_rgb = cv2.undistort(frame_left_rgb, cam_mat, dist_coeffs, newCameraMatrix=new_cam_mat)
+        frame_right_rgb = cv2.undistort(frame_right_rgb, cam_mat, dist_coeffs, newCameraMatrix=new_cam_mat)
+        # Add text labels for left/right cameras
         cv2.putText(frame_left_rgb, "Left Camera", (600, 30), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 4)
         cv2.putText(frame_right_rgb, "Right Camera", (600, 30), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 4)
         # Send both images as ImageBackground objects for left/right eye
