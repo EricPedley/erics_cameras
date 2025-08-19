@@ -2,18 +2,27 @@ import cv2
 from vuer import Vuer, VuerSession
 import asyncio
 from vuer.schemas import ImageBackground
-from erics_cameras import RTSPCamera
 
 async def stream_cameras(session: VuerSession, left_src=0, right_src=1):
-    left_cap = RTSPCamera()
+    pipeline_cam0 = (
+        "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@88000/ov5647@36 ! "
+        "video/x-raw,format=BGR,width=1280,height=960,framerate=30/1 ! "
+        "videoconvert ! appsink drop=1 max-buffers=1"
+    )
+
+    pipeline_cam1 = (
+        "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36 ! "
+        "video/x-raw,format=BGR,width=1280,height=960,framerate=30/1 ! "
+        "videoconvert ! appsink drop=1 max-buffers=1"
+    )
+
+    cap1 = cv2.VideoCapture(pipeline_cam0, cv2.CAP_GSTREAMER)
+    cap2 = cv2.VideoCapture(pipeline_cam1, cv2.CAP_GSTREAMER)
     while True:
-        img_left = left_cap.take_image()
-        img_right = left_cap.take_image()
-        if img_left is None or img_right is None:
+        ret_left, frame_left = cap1.read()
+        ret_right, frame_right = cap2.read()
+        if not ret_left or not ret_right:
             continue
-        
-        frame_left = img_left.get_array()
-        frame_right = img_right.get_array()
         frame_left_rgb = cv2.cvtColor(frame_left, cv2.COLOR_BGR2RGB)
         frame_right_rgb = cv2.cvtColor(frame_right, cv2.COLOR_BGR2RGB)
         cv2.putText(frame_left_rgb, "Left Camera", (100, 30), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 4)
