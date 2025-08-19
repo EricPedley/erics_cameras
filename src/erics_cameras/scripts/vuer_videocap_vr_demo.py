@@ -16,6 +16,8 @@ async def stream_cameras(session: VuerSession, left_src=0, right_src=1):
         frame_right = img_right.get_array()
         frame_left_rgb = cv2.cvtColor(frame_left, cv2.COLOR_BGR2RGB)
         frame_right_rgb = cv2.cvtColor(frame_right, cv2.COLOR_BGR2RGB)
+        cv2.putText(frame_left_rgb, "Left Camera", (100, 30), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 4)
+        cv2.putText(frame_right_rgb, "Right Camera", (100, 30), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 4)
         # Send both images as ImageBackground objects for left/right eye
         session.upsert([
             ImageBackground(
