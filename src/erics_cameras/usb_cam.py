@@ -39,7 +39,7 @@ class USBCam(Camera):
         # laptop params:
         self._pipeline_str = (
             rf"v4l2src device={video_path} io-mode=2 ! "
-            rf"image/jpeg,width={resolution.value[0]},height={resolution.value[1]},framerate=30/1 ! "
+            rf"image/jpeg,width={resolution.value[0]},height={resolution.value[1]},framerate=10/1 ! "
             r"jpegdec ! "
             r"videoconvert ! "
             r"video/x-raw, format=BGR ! "
