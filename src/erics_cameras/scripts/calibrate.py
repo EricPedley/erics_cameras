@@ -78,6 +78,11 @@ Examples:
     )
 
     parser.add_argument(
+        "--exposure_value", help="Exposure value (EV) adjustment for auto exposure",
+        type=int, default=10000
+    )
+
+    parser.add_argument(
         "--gain_mode", help="Gain mode: 'auto' or 'manual'", 
         choices=["auto", "manual"], default="auto"
     )
