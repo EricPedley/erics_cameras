@@ -12,27 +12,16 @@ new_cam_mat, _ = cv2.getOptimalNewCameraMatrix(cam_mat, dist_coeffs, (1280, 960)
 map1, map2 = cv2.initUndistortRectifyMap(cam_mat, dist_coeffs, None, new_cam_mat, (1280, 960), cv2.CV_32FC1)
 
 async def stream_cameras(session: VuerSession, left_src=0, right_src=1):
-    cam_left = LibCameraCam(
-        log_dir=None,
-        resolution=LibCameraCam.ResolutionOption.R720P,
-        camera_name="/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36",
-        framerate=45,
-    )
-    cam_right = LibCameraCam(
-        log_dir=None,
-        resolution=LibCameraCam.ResolutionOption.R720P,
-        camera_name="/base/axi/pcie@1000120000/rp1/i2c@88000/ov5647@36",
-        framerate=45,
-    )
+    left_pipeline = "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36 exposure-time-mode=0 analogue-gain-mode=0 ae-enable=true awb-enable=true af-mode=manual ! video/x-raw,format=BGR,width=1280,height=720,framerate=30/1 ! videoconvert ! appsink drop=1 max-buffers=1"
+    right_pipeline = "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@88000/ov5647@36 exposure-time-mode=0 analogue-gain-mode=0 ae-enable=true awb-enable=true af-mode=manual ! video/x-raw,format=BGR,width=1280,height=720,framerate=30/1 ! videoconvert ! appsink drop=1 max-buffers=1"
+    cam_left = cv2.VideoCapture(left_pipeline, cv2.CAP_GSTREAMER)
+    cam_right = cv2.VideoCapture(right_pipeline, cv2.CAP_GSTREAMER)
     
     while True:
-        img_left = cam_left.take_image()
-        img_right = cam_right.take_image()
-        if img_left is None or img_right is None:
+        ret_left, frame_left = cam_left.read()
+        ret_right, frame_right = cam_right.read()
+        if not ret_left or not ret_right:
             continue
-        
-        frame_left = img_left.get_array()
-        frame_right = img_right.get_array()
         frame_left_rgb = cv2.cvtColor(frame_left, cv2.COLOR_BGR2RGB)
         frame_right_rgb = cv2.cvtColor(frame_right, cv2.COLOR_BGR2RGB)
         frame_left_rgb = cv2.remap(frame_left_rgb, map1, map2, cv2.INTER_LINEAR)
