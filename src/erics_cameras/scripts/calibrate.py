@@ -6,6 +6,7 @@ import numpy as np
 import os
 
 from erics_cameras import GstCamera, ReplayCamera, CSICamera, USBCamera, LibCameraCam
+from erics_cameras.videocap_cam import VideoCapCam
 from time import strftime, time
 from pathlib import Path
 from typing import Any
@@ -146,7 +147,7 @@ Examples:
     last_image_add_time = time()
 
     # Determine source type and initialize camera
-    if args.source in ["v4l2", "nvargus", "libcamera"]:
+    if args.source in ["v4l2", "nvargus", "libcamera", None]:
         LIVE = True
         logs_base = Path("logs")
         time_dir = Path(strftime("%Y-%m-%d/%H-%M"))
@@ -164,6 +165,9 @@ Examples:
             camera = CSICamera(None)
         elif args.source == "v4l2":
             camera = USBCamera(None)
+        else:
+            print("Defaulting to VideocapCam")
+            camera = VideoCapCam(None)
             
             # Create control window with sliders for camera properties
             class CameraController:
@@ -546,6 +550,9 @@ Examples:
                     (255,255,255),
                     1,
                 )
+            ret, chessboard_corners = cv2.findChessboardCorners(img_bgr, (NUMBER_OF_SQUARES_HORIZONTALLY-1, NUMBER_OF_SQUARES_VERTICALLY-1), None)
+            cv2.drawChessboardCorners(img_debug, (NUMBER_OF_SQUARES_HORIZONTALLY-1, NUMBER_OF_SQUARES_VERTICALLY-1), chessboard_corners, ret)
+
             img_debug = cv2.resize(img_debug, (1024, 576))
             cv2.imshow("calib", img_debug)
             cv2.imshow('undistorted', cv2.resize(undistorted_debug, (1024, 576)))
