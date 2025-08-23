@@ -66,7 +66,7 @@ Examples:
     )
     parser.add_argument(
         "--calibration_model", help="Calibration model to use: 'normal' (k1,k2,p1,p2,k3) or 'fisheye' (k1,k2,p1,p2)", 
-        choices=["normal", "fisheye"], default="fisheye"
+        choices=["normal", "fisheye"], default="normal"
     )
     parser.add_argument(
         "--force_visualization", help="Force enable visualizations even when using folder/video source", 
