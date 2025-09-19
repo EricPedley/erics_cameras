@@ -7,27 +7,42 @@ from time import strftime, time
 from pathlib import Path
 
 from erics_cameras.usb_cam import USBCam
-from erics_cameras.stereo_cam import StereoCam
+from erics_cameras.stereo_cam import StereoCam, StereoReplayCam
 
 CALIB_BATCH_SIZE = 15
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description="Stereo camera calibration script using fisheye model with USB camera.",
+        description="Stereo camera calibration script using fisheye model with USB camera or folder.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Stereo calibration with USB camera (default)
   python stereo_calibrate.py
   
+  # Calibrate from image folder
+  python stereo_calibrate.py --source folder --source_path /path/to/stereo/images
+  
   # Specify USB device path
-  python stereo_calibrate.py --video_path /dev/video0
+  python stereo_calibrate.py --source usb --video_path /dev/video0
   
   # Disable motion and time checks for faster processing
-  python stereo_calibrate.py --disable_motion_check --disable_time_check
+  python stereo_calibrate.py --source folder --source_path /path/to/images --disable_motion_check --disable_time_check
         """
     )
     
+    parser.add_argument(
+        "--source",
+        help="Source for calibration: 'usb' for live USB camera or 'folder' for image folder",
+        choices=["usb", "folder"],
+        default="usb"
+    )
+    parser.add_argument(
+        "--source_path",
+        help="Path to stereo image folder when using --source folder",
+        type=str,
+        default=None
+    )
     parser.add_argument(
         "--video_path", 
         help="Path to USB video device", 
@@ -42,6 +57,11 @@ Examples:
     parser.add_argument(
         "--disable_time_check", 
         help="Disable time check between consecutive images", 
+        action="store_true"
+    )
+    parser.add_argument(
+        "--force_visualization",
+        help="Force enable visualizations even when using folder source",
         action="store_true"
     )
     
@@ -91,31 +111,67 @@ Examples:
     dist_coeffs1 = np.array([[0.04272378], [-0.01961093], [-0.00135352], [0.00050177]])
     dist_coeffs2 = np.array([[0.04272378], [-0.01961093], [-0.00135352], [0.00050177]])
     
-    DIM = (1280, 720)  # Half width for each camera from dual camera setup
+    DIM = (640, 720)  # Half width for each camera from dual camera setup
 
-    # Initialize stereo camera
-    usb_cam = USBCam(
-        log_dir="./testimages",
-        resolution=USBCam.ResolutionOption.R720P_DUAL,
-        video_path=args.video_path
-    )
-    stereo_cam = StereoCam(usb_cam=usb_cam)
-    left_cam = stereo_cam.get_left_camera()
-    right_cam = stereo_cam.get_right_camera()
+    # Determine source type and initialize stereo camera
+    if args.source == "usb":
+        LIVE = True
+        # Initialize stereo camera with USB
+        usb_cam = USBCam(
+            log_dir="./testimages",
+            resolution=USBCam.ResolutionOption.R720P_DUAL,
+            video_path=args.video_path
+        )
+        stereo_cam = StereoCam(usb_cam=usb_cam)
+        left_cam = stereo_cam.get_left_camera()
+        right_cam = stereo_cam.get_right_camera()
+        
+        # Create logs directory
+        logs_base = Path("logs")
+        time_dir = Path(strftime("%Y-%m-%d/%H-%M"))
+        logs_path = logs_base / time_dir
+        imgs_path = logs_path / "stereo_calib_imgs"
+        imgs_path.mkdir(exist_ok=True, parents=True)
+        
+    elif args.source == "folder":
+        LIVE = False
+        if args.source_path is None:
+            raise ValueError("--source_path must be provided when using --source folder")
+        
+        # Initialize StereoReplayCam
+        stereo_cam = StereoReplayCam(args.source_path)
+        print(f"Using StereoReplayCam with folder: {args.source_path}")
+        total_pairs = stereo_cam.get_total_frames()
+        print(f"Found {total_pairs} stereo image pairs")
+        
+        # Display check status
+        print(f"Motion check: {'enabled' if not args.disable_motion_check else 'disabled'}")
+        print(f"Time check: {'enabled' if not args.disable_time_check else 'disabled'}")
+        print(f"Visualization: {'enabled' if args.force_visualization else 'disabled'}")
+        
+        # Create logs directory for output
+        logs_base = Path("logs")
+        time_dir = Path(strftime("%Y-%m-%d/%H-%M"))
+        logs_path = logs_base / time_dir
+        imgs_path = logs_path / "stereo_calib_imgs"
+        imgs_path.mkdir(exist_ok=True, parents=True)
+        
+    else:
+        raise ValueError(f"Invalid source type: {args.source}")
 
-    # Create logs directory
-    logs_base = Path("logs")
-    time_dir = Path(strftime("%Y-%m-%d/%H-%M"))
-    logs_path = logs_base / time_dir
-    imgs_path = logs_path / "stereo_calib_imgs"
-    imgs_path.mkdir(exist_ok=True, parents=True)
-    
     # Create visualization windows
-    cv2.namedWindow("left", cv2.WINDOW_NORMAL)
-    cv2.namedWindow("right", cv2.WINDOW_NORMAL) 
-    cv2.namedWindow("charuco_board", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("left", (640, 360))
-    cv2.resizeWindow("right", (640, 360))
+    if LIVE or args.force_visualization:
+        try:
+            cv2.namedWindow("left", cv2.WINDOW_NORMAL)
+            cv2.namedWindow("right", cv2.WINDOW_NORMAL) 
+            cv2.namedWindow("charuco_board", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("left", (640, 360))
+            cv2.resizeWindow("right", (640, 360))
+            print("Visualization windows created successfully")
+        except cv2.error as e:
+            print(f"Warning: Could not create visualization windows: {e}")
+            print("Visualization will be disabled (this is normal in headless environments)")
+            args.force_visualization = False
     
     # Generate and display board image
     board_img = cv2.cvtColor(
@@ -203,14 +259,28 @@ Examples:
 
     print("Starting stereo calibration. Press 'q' to quit.")
     
+    index = 0  # Frame counter for folder processing
+    
     while True:
         # Get synchronized stereo image pair
         try:
-            left_img, right_img = stereo_cam.get_image_pair()
-            left_bgr = left_img.get_array()
-            right_bgr = right_img.get_array()
+            if LIVE:
+                left_img, right_img = stereo_cam.get_image_pair()
+                left_bgr = left_img.get_array()
+                right_bgr = right_img.get_array()
+            else:
+                # Using StereoReplayCam for folder processing
+                left_bgr, right_bgr = stereo_cam.take_image()
+                if left_bgr is None or right_bgr is None:
+                    print("Failed to get stereo images from folder")
+                    break
+                index += 1
+                print(f"Processing stereo pair {index}/{total_pairs}")
         except RuntimeError as e:
             print(f"Failed to get stereo images: {e}")
+            break
+        except Exception as e:
+            print(f"StereoReplayCam exhausted or error: {e}")
             break
 
         # Convert to grayscale for detection
@@ -413,12 +483,14 @@ Examples:
                 cv2.putText(img, "Originality: N/A", (5, 45), 
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-        # Display images
-        cv2.imshow("left", cv2.resize(left_debug, (640, 360)))
-        cv2.imshow("right", cv2.resize(right_debug, (640, 360)))
-        cv2.imshow("charuco_board", board_img)
-        
-        key = cv2.waitKey(1)
+        # Display images and handle key input
+        if LIVE or args.force_visualization:
+            cv2.imshow("left", cv2.resize(left_debug, (640, 360)))
+            cv2.imshow("right", cv2.resize(right_debug, (640, 360)))
+            cv2.imshow("charuco_board", board_img)
+            key = cv2.waitKey(1)
+        else:
+            key = 1  # No key input when processing from folder
 
         # Add image pair to calibration dataset
         if (not do_skip_pose and valid_left and valid_right and 
@@ -432,13 +504,22 @@ Examples:
             num_total_images_used += 1
             last_image_add_time = time()
             
-            # Save images
-            cv2.imwrite(f'{imgs_path}/left_{len(list(imgs_path.glob("left_*.png")))}.png', left_bgr)
-            cv2.imwrite(f'{imgs_path}/right_{len(list(imgs_path.glob("right_*.png")))}.png', right_bgr)
+            # Save images only for live camera
+            if LIVE:
+                cv2.imwrite(f'{imgs_path}/left_{len(list(imgs_path.glob("left_*.png")))}.png', left_bgr)
+                cv2.imwrite(f'{imgs_path}/right_{len(list(imgs_path.glob("right_*.png")))}.png', right_bgr)
 
             # Run calibration periodically
-            is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
-            if num_total_images_used >= CALIB_BATCH_SIZE and is_time_to_calib:
+            if LIVE:
+                is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
+                calibration_criteria_met = num_total_images_used >= CALIB_BATCH_SIZE and is_time_to_calib
+            else:
+                # For folder processing, calibrate when we have enough images or at the end
+                is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
+                calibration_criteria_met = ((num_total_images_used >= CALIB_BATCH_SIZE and is_time_to_calib) or 
+                                           (index >= total_pairs))
+            
+            if calibration_criteria_met:
                 sample_indices = np.random.choice(
                     np.arange(num_total_images_used), 
                     min(60, num_total_images_used), 

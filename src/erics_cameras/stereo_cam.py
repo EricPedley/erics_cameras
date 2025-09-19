@@ -1,6 +1,8 @@
 from erics_cameras.camera import Camera
 from erics_cameras.camera_types import Image
 from erics_cameras.usb_cam import USBCam
+from pathlib import Path
+import cv2
 
 class StereoCam:
     '''
@@ -80,3 +82,34 @@ class _StereoUSBCamWrapper(Camera):
         else:
             return frame[:, width//2:]
     
+class StereoReplayCam:
+    def __init__(self, folder_path: str | Path):
+        self.folder_path = Path(folder_path)
+        self.index = 0
+        
+        # Count available image pairs to know when to stop
+        left_images = sorted(list(self.folder_path.glob("left_*.png")))
+        right_images = sorted(list(self.folder_path.glob("right_*.png")))
+        self.total_pairs = min(len(left_images), len(right_images))
+    
+    def take_image(self):
+        if self.index >= self.total_pairs:
+            raise RuntimeError("No more image pairs available")
+            
+        left_path = self.folder_path / f"left_{self.index}.png"
+        right_path = self.folder_path / f"right_{self.index}.png"
+        
+        if not left_path.exists() or not right_path.exists():
+            raise RuntimeError(f"Missing image files: {left_path} or {right_path}")
+            
+        left_image = cv2.imread(str(left_path))
+        right_image = cv2.imread(str(right_path))
+        
+        if left_image is None or right_image is None:
+            raise RuntimeError(f"Failed to load image files: {left_path} or {right_path}")
+        
+        self.index += 1
+        return left_image, right_image
+    
+    def get_total_frames(self):
+        return self.total_pairs
