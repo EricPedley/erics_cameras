@@ -327,7 +327,7 @@ Examples:
                         shape,
                         None, 
                         None,
-                        flags=cv2.fisheye.CALIB_FIX_SKEW | cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC | cv2.fisheye.CALIB_CHECK_COND,
+                        flags=cv2.fisheye.CALIB_FIX_SKEW | cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC, # CALIB_RECOMPUTE_EXTRINSIC is super duper important. It makes the error go from >50 to <1
                         # criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
                     )
                 )
