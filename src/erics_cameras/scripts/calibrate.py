@@ -66,7 +66,7 @@ Examples:
     )
     parser.add_argument(
         "--calibration_model", help="Calibration model to use: 'normal' (k1,k2,p1,p2,k3) or 'fisheye' (k1,k2,p1,p2)", 
-        choices=["normal", "fisheye"], default="fisheye"
+        choices=["normal", "fisheye"], default="normal"
     )
     parser.add_argument(
         "--force_visualization", help="Force enable visualizations even when using folder/video source", 
@@ -117,15 +117,21 @@ Examples:
         dictionary=charuco_marker_dictionary,
     )
 
-    cam_mat = np.array([[266.61728276,0.,643.83126137],[0.,266.94450686,494.81811813],[0.,0.,1.,]])
+    # cam_mat = np.array([[266.61728276,0.,643.83126137],[0.,266.94450686,360],[0.,0.,1.,]]).astype(np.float32)
+    # cam_mat = np.array([[482.39269746,0.,611.46236,],[0.,482.66860918,421.66572138],[0.,0.,1.,]])
+    cam_mat = np.array([[492.13911009,0.,619.74260304],[0.,492.22808195,420.97601015],[0.,0.,1.,]])
+# k1, k2, k3, k4 (fisheye model)
+    # k1, k2, p1, p2, k3 (normal model)
     # k1, k2, p1, p2, k3 (normal model)
     DIM = (1280, 960)
     
     # Initialize distortion coefficients based on calibration model
     if args.calibration_model == "fisheye":
-        dist_coeffs = np.zeros((1,4), dtype=np.float32)  # Fisheye uses 4 distortion coefficients (k1, k2, p1, p2)
+        # dist_coeffs = np.zeros((1,4), dtype=np.float32)  # Fisheye uses 4 distortion coefficients (k1, k2, p1, p2)
+        dist_coeffs = np.array([[0.04272378],[-0.01961093],[-0.00135352],[0.00050177]])
     else:
-        dist_coeffs = np.array([[-6.07417419e-02,9.95447444e-02,-2.26448001e-04,1.22881804e-03,3.42134205e-03,1.45361886e-01,8.03248099e-02,2.11170107e-02,-3.80620047e-03,2.48350591e-05,-8.33565666e-04,2.97806723e-05]])
+        # dist_coeffs = np.array([[-6.07417419e-02,9.95447444e-02,-2.26448001e-04,1.22881804e-03,3.42134205e-03,1.45361886e-01,8.03248099e-02,2.11170107e-02,-3.80620047e-03,2.48350591e-05,-8.33565666e-04,2.97806723e-05]])
+        dist_coeffs = np.array([[-2.26890554e-01,4.59103783e-02,-3.38637996e-05,3.42812214e-04,-3.84558501e-03]])
     
     # Initialize undistortion maps
     map1, map2 = None, None
@@ -319,10 +325,10 @@ Examples:
                         object_points_list,
                         image_points_list,
                         shape,
-                        cam_mat, 
-                        np.zeros((4, 1)),
-                        flags=cv2.fisheye.CALIB_FIX_SKEW,
-                        criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
+                        None, 
+                        None,
+                        flags=cv2.fisheye.CALIB_FIX_SKEW | cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC | cv2.fisheye.CALIB_CHECK_COND,
+                        # criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
                     )
                 )
                 dist_coeffs_comment = "# k1, k2, k3, k4 (fisheye model)"
@@ -334,8 +340,8 @@ Examples:
                         shape,
                         None,
                         None,
-                        flags=cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_THIN_PRISM_MODEL,
-                        criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
+                        flags=None,#cv2.CALIB_RATIONAL_MODEL + cv2.CALIB_THIN_PRISM_MODEL,
+                        # criteria=(cv2.TERM_CRITERIA_EPS+cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-6)
                     )
                 )
                 dist_coeffs_comment = "# k1, k2, p1, p2, k3 (normal model)"
@@ -390,7 +396,8 @@ Examples:
         do_undistortion_trickery = dist_coeffs[0][0] != 0
         if do_undistortion_trickery:
             if args.calibration_model == "fisheye":
-                img_gray_undistorted = cv2.remap(img_gray, map1, map2, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+                # img_gray_undistorted = cv2.remap(img_gray, map1, map2, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+                img_gray_undistorted = cv2.fisheye.undistortImage(img_gray, cam_mat, dist_coeffs)
             else:
                 img_gray_undistorted = cv2.undistort(img_gray, cam_mat, dist_coeffs)
         else:
@@ -424,7 +431,7 @@ Examples:
             )
             if ret:
                 reproj: np.ndarray = project_function(
-                    point_references.object_points, rvecs, tvecs, cam_mat, dist_coeffs
+                    point_references.object_points, rvecs, tvecs, cam_mat.astype(dist_coeffs.dtype), dist_coeffs
                 )[0].squeeze()
 
                 img_avg_reproj_err = np.mean(
@@ -548,6 +555,7 @@ Examples:
                 )
             img_debug = cv2.resize(img_debug, (1024, 576))
             cv2.imshow("calib", img_debug)
+            cv2.imshow("board", board_img)
             cv2.imshow('undistorted', cv2.resize(undistorted_debug, (1024, 576)))
             key = cv2.waitKey(1)
             
