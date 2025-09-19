@@ -6,7 +6,8 @@ from typing import NamedTuple
 import numpy as np
 import os
 
-from erics_cameras import GstCamera
+from erics_cameras.stereo_cam import StereoCam
+from erics_cameras.usb_cam import USBCam
 from time import strftime, time
 from pathlib import Path
 from typing import Any
@@ -82,9 +83,10 @@ if __name__ == '__main__':
         dictionary=charuco_marker_dictionary,
     )
 
-    cam_mat = np.array([[297.80062345,0.,685.72493754],[0.,298.63865273,451.61133244],[0.,0.,1.,]])
-    # k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4, Tx, Ty
-    dist_coeffs = np.array([[-0.20148179,0.03270111,0.,0.,-0.00211291]])
+    cam_mat = np.array([[492.13911009,0.,619.74260304],[0.,492.22808195,420.97601015],[0.,0.,1.,]])
+    DIM = (1280, 960)
+    
+    dist_coeffs = np.array([[0.04272378],[-0.01961093],[-0.00135352],[0.00050177]])
 
     matrix_l = cam_mat
     matrix_r = cam_mat
@@ -108,28 +110,21 @@ if __name__ == '__main__':
         time_dir = Path(strftime("%Y-%m-%d/%H-%M"))
         logs_path = logs_base / time_dir
 
-        pipeline_cam0 = (
-            "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@88000/ov5647@36 ! "
-            "video/x-raw,format=BGR,width=1280,height=960,framerate=30/1 ! "
-            "videoconvert ! appsink drop=1 max-buffers=1"
+        usb_cam = USBCam(
+            log_dir="./testimages",
+            resolution=USBCam.ResolutionOption.R720P_DUAL,
+            video_path='/dev/video0'
         )
-
-        pipeline_cam1 = (
-            "libcamerasrc camera-name=/base/axi/pcie@1000120000/rp1/i2c@80000/ov5647@36 ! "
-            "video/x-raw,format=BGR,width=1280,height=960,framerate=30/1 ! "
-            "videoconvert ! appsink drop=1 max-buffers=1"
-        )
-
-        cap0 = cv.VideoCapture(pipeline_cam0, cv.CAP_GSTREAMER)
-        cap1 = cv.VideoCapture(pipeline_cam1, cv.CAP_GSTREAMER)
+        stereo_cam = StereoCam(usb_cam=usb_cam)
         # cap0 = cv.VideoCapture('/home/dpsh/kscalecontroller/pi/left_video.avi')
         # cap1 = cv.VideoCapture('/home/dpsh/kscalecontroller/pi/right_video.avi')
         # camera.start_recording()
         # cv.namedWindow("calib", cv.WINDOW_NORMAL)
         cv.namedWindow("left", cv.WINDOW_NORMAL)
         cv.namedWindow("right", cv.WINDOW_NORMAL)
+        cv.namedWindow("charuco", cv.WINDOW_NORMAL)
         # cv.resizeWindow("calib", (1024, 576))
-        # board_img = cv.cvtColor(cv.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv.ROTATE_90_CLOCKWISE), cv.COLOR_GRAY2BGR)
+        board_img = cv.cvtColor(cv.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv.ROTATE_90_CLOCKWISE), cv.COLOR_GRAY2BGR)
         # cv.resizeWindow("charuco_board", (1600,900))
 
     index = 0
@@ -152,17 +147,12 @@ if __name__ == '__main__':
             # img_l = camera_l.take_image()
             # img_r = camera_r.take_image()
 
-            if not (cap0.grab() and cap1.grab()):
-                print("❌ Failed to grab from one or both cameras")
-                continue
-
-            # Decode after pulling both from buffers
-            ret_l, img_bgr_l = cap0.retrieve()
-            ret_r, img_bgr_r = cap1.retrieve()
-
-            if not ret_l or not ret_r:
+            img_l, img_r = stereo_cam.get_image_pair()
+            if img_l is None or img_r is None:
                 print("Failed to get image")
                 continue
+            img_bgr_l = img_l.get_array()
+            img_bgr_r = img_r.get_array()
         else:
             if index == len(images):
                 break
@@ -215,7 +205,7 @@ if __name__ == '__main__':
                 cv.circle(img_r_debug, tuple(pt.astype(int)), 5, (0,255,0), -1)
 
 
-            ret, rvecs_l, tvecs_l = cv.solvePnP(
+            ret, rvecs_l, tvecs_l = cv.fisheye.solvePnP(
                 full_refs_l.object_points,
                 full_refs_l.image_points,
                 cam_mat,
@@ -223,7 +213,7 @@ if __name__ == '__main__':
                 flags=cv.SOLVEPNP_IPPE,
             )
 
-            ret, rvecs_r, tvecs_r = cv.solvePnP(
+            ret, rvecs_r, tvecs_r = cv.fisheye.solvePnP(
                 full_refs_r.object_points,
                 full_refs_r.image_points,
                 cam_mat,
@@ -234,7 +224,7 @@ if __name__ == '__main__':
             R, t = compute_relative_pose(rvecs_l, tvecs_l, rvecs_r, tvecs_r)
             print(R,t)
             if ret:
-                reproj: np.ndarray = cv.projectPoints(
+                reproj: np.ndarray = cv.fisheye.projectPoints(
                     full_refs_l.object_points, rvecs_l, tvecs_l, cam_mat, dist_coeffs
                 )[0].squeeze()
 
@@ -362,6 +352,7 @@ if __name__ == '__main__':
                 )
             cv.imshow("left", cv.resize(img_l_debug, (1024, 576)))
             cv.imshow("right", cv.resize(img_r_debug, (1024, 576)))
+            cv.imshow("charuco", board_img)
             key = cv.waitKey(1)
         else:
             key = 1
