@@ -130,6 +130,55 @@ if __name__ == '__main__':
             cv.line(img_right_lines, (0, y), (img_right.shape[1], y), (0, 255, 0), 1)
         
         return img_left_lines, img_right_lines
+    
+    def run_individual_camera_calibration(object_points, image_points, image_size, cam_mat_init, dist_coeffs_init):
+        """Run individual fisheye camera calibration"""
+        try:
+            ret, cam_mat, dist_coeffs, rvecs, tvecs = cv.fisheye.calibrate(
+                object_points,
+                image_points, 
+                image_size,
+                cam_mat_init.copy(),
+                dist_coeffs_init.copy(),
+                flags=cv.fisheye.CALIB_RECOMPUTE_EXTRINSIC,
+                criteria=(cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 50, 1e-5)
+            )
+            print(f"Individual camera calibration error: {ret:.4f}")
+            return ret, cam_mat, dist_coeffs, rvecs, tvecs
+        except Exception as e:
+            print(f"Error in individual camera calibration: {e}")
+            return None, None, None, None, None
+    
+    def run_stereo_calibration_with_initial(object_points, image_points_l, image_points_r, 
+                                           cam_mat_l, dist_l, cam_mat_r, dist_r, 
+                                           image_size, R_init=None, T_init=None):
+        """Run stereo calibration with optional initial R and T estimates"""
+        try:
+            if R_init is not None and T_init is not None:
+                print("Running stereoCalibrate with initial R and T from moving averages")
+                ret, K1, D1, K2, D2, R, T, E, F = cv.fisheye.stereoCalibrate(
+                    object_points, image_points_l, image_points_r,
+                    cam_mat_l, dist_l, cam_mat_r, dist_r, 
+                    image_size,
+                    R=R_init,  # Use moving average as initial guess
+                    T=T_init,  # Use moving average as initial guess
+                    flags=cv.fisheye.CALIB_USE_INTRINSIC_GUESS | cv.fisheye.CALIB_FIX_INTRINSIC | cv.fisheye.CALIB_CHECK_COND
+                )
+            else:
+                print("Running stereoCalibrate without initial conditions")
+                ret, K1, D1, K2, D2, R, T, E, F = cv.fisheye.stereoCalibrate(
+                    object_points, image_points_l, image_points_r,
+                    cam_mat_l, dist_l, cam_mat_r, dist_r,
+                    image_size,
+                    flags=cv.CALIB_USE_INTRINSIC_GUESS
+                )
+            
+            print(f"Stereo calibration reprojection error: {ret:.4f}")
+            return ret, K1, D1, K2, D2, R, T, E, F
+            
+        except Exception as e:
+            print(f"Error in stereo calibration: {e}")
+            return None, None, None, None, None, None, None, None, None
     parser = argparse.ArgumentParser(description="Camera calibration script.")
     parser.add_argument(
         "--cam_type", help="Type of camera to use for calibration.", choices=["0", "1", "2"], default=None
@@ -155,8 +204,8 @@ if __name__ == '__main__':
         tvecs: Any
 
 
-    SQUARE_LENGTH = 5
-    MARKER_LENGTH = 3
+    SQUARE_LENGTH = 500
+    MARKER_LENGTH = 300
     NUMBER_OF_SQUARES_VERTICALLY = 11
     NUMBER_OF_SQUARES_HORIZONTALLY = 8
 
@@ -197,16 +246,12 @@ if __name__ == '__main__':
     # Rectification state
     rectify_maps = None
     rectification_ready = False
-
-    # Moving average for R and T
-    R_history = []
-    T_history = []
-    R_avg = np.eye(3)
-    T_avg = np.array([[0.116], [0], [0]])  # Initial estimate
     
-    # Rectification state
-    rectify_maps = None
-    rectification_ready = False
+    # Calibration state tracking
+    intrinsics_calibrated = False
+    stereo_calibrated = False
+    INTRINSICS_BATCH_SIZE = 15
+    STEREO_BATCH_SIZE = 30
 
     LIVE = bool(os.getenv("LIVE", True))
 
@@ -280,7 +325,7 @@ if __name__ == '__main__':
         detection_results_r = BoardDetectionResults(*charuco_detector.detectBoard(img_gray_r))
 
         img_avg_reproj_err = None
-        closest_pose_dist = 0 # TODO: refactor. This makes it really hard to keep track of where this variable is scoped
+        closest_pose_dist = None  # Initialize as None like calibrate.py
         # Find common IDs between left and right detections
 
         if (
@@ -316,29 +361,25 @@ if __name__ == '__main__':
             ret, rvecs_l, tvecs_l = cv.fisheye.solvePnP(
                 full_refs_l.object_points,
                 full_refs_l.image_points,
-                cam_mat,
-                dist_coeffs,
+                matrix_l,
+                dist_l,
                 flags=cv.SOLVEPNP_IPPE,
             )
 
             ret, rvecs_r, tvecs_r = cv.fisheye.solvePnP(
                 full_refs_r.object_points,
                 full_refs_r.image_points,
-                cam_mat,
-                dist_coeffs,
+                matrix_r,
+                dist_r,
                 flags=cv.SOLVEPNP_IPPE,
             )
 
             R, t = compute_relative_pose(rvecs_l, tvecs_l, rvecs_r, tvecs_r)
             
-            # Update moving averages for R and T
-            R_avg = update_moving_average_rotation(R, R_history, window_size=10)
-            T_avg = update_moving_average_translation(t, T_history, window_size=10)
-            
-            # Setup/update rectification with averaged parameters
+            # Setup/update rectification with averaged parameters (if we have enough samples)
             if len(R_history) >= 3:  # Wait for a few samples before rectification
                 rectify_maps = setup_stereo_rectification(
-                    cam_mat, dist_coeffs, cam_mat, dist_coeffs,
+                    matrix_l, dist_l, matrix_r, dist_r,
                     R_avg, T_avg, DIM
                 )
                 if rectify_maps is not None:
@@ -417,15 +458,13 @@ if __name__ == '__main__':
             else:
                 combo_vec = np.concatenate((rvecs_l.squeeze(), tvecs_l.squeeze()))
                 pose_too_close = pose_circular_buffer_size > 0 and (closest_pose_dist:=np.min(np.linalg.norm(pose_circular_buffer[:pose_circular_buffer_size] - combo_vec.reshape((1,6)), axis=1))) < 500
-                if pose_too_close or movement_magnitude>1:
+                if pose_too_close or time() - last_image_add_time < 0.5 or movement_magnitude > 1:
                     do_skip_pose = True
                 else:
                     pose_circular_buffer[pose_circular_buffer_index] = combo_vec
                     pose_circular_buffer_index = (pose_circular_buffer_index + 1) % pose_circular_buffer.shape[0]
                     pose_circular_buffer_size = min(pose_circular_buffer_size + 1, pose_circular_buffer.shape[0])
                     do_skip_pose = False
-                if time() - last_image_add_time < 0.5:
-                    do_skip_pose = True
         else:
             point_refs_l = None
             do_skip_pose = True
@@ -437,7 +476,7 @@ if __name__ == '__main__':
                     text_color = (0, 255, 0)
                 else:
                     text_color = (0, 0, 255)
-            for img in (img_l_debug, img_r_debug):
+            for img in (img_l_debug, img_r_debug, board_img):
                 cv.rectangle(
                     img,
                     (0,0),
@@ -521,77 +560,170 @@ if __name__ == '__main__':
         else:
             key = 1
         shape = img_bgr_l.shape[:2]
-        if not do_skip_pose and img_avg_reproj_err is not None and img_avg_reproj_err > 1 and point_refs_l is not None and len(point_refs_l.object_points) > 4:
+        if not do_skip_pose and img_avg_reproj_err is not None and point_refs_l is not None and len(point_refs_l.object_points) > 4:
             total_object_points.append(point_refs_l.object_points)
             total_image_points.append(point_refs_l.image_points)
-            CALIB_BATCH_SIZE = 15
-            num_total_images_used +=1
+            num_total_images_used += 1
 
             # Add to stereo lists
             stereo_object_points.append(point_refs_l.object_points)
             stereo_image_points_l.append(point_refs_l.image_points)
             stereo_image_points_r.append(point_refs_r.image_points)
-            is_time_to_calib = num_total_images_used % CALIB_BATCH_SIZE == 0
+            
+            # Update moving averages for R and T only when image is added to calibration
+            if 'R' in locals() and 't' in locals():
+                R_avg = update_moving_average_rotation(R, R_history, window_size=10)
+                T_avg = update_moving_average_translation(t, T_history, window_size=10)
+            
             last_image_add_time = time()
 
-            if LIVE:
-                calibration_criteria_met = num_total_images_used >= CALIB_BATCH_SIZE and is_time_to_calib
-            else:
-                calibration_criteria_met = index == len(images)
-
-            if calibration_criteria_met:
-                sample_indices = np.random.choice(np.arange(num_total_images_used), min(60, num_total_images_used))
-                if num_total_images_used <= CALIB_BATCH_SIZE:
-                    flags = None
-                elif num_total_images_used <= 2*CALIB_BATCH_SIZE:
-                    flags = cv.CALIB_RATIONAL_MODEL
-                else:
-                    flags = cv.CALIB_RATIONAL_MODEL + cv.CALIB_THIN_PRISM_MODEL 
-                flags = None
-                last_nonzero_dist_coef_limit = max([5]+[i+1 for i in range(5,len(dist_coeffs)) if dist_coeffs[0,i]!=0.0])
-                ret, CM1, dist1, CM2, dist2, R, T, E, F = cv.stereoCalibrate(stereo_object_points, stereo_image_points_l, stereo_image_points_r, matrix_l, dist_l, matrix_r, dist_r, (1280, 960))
-
-                print(R,T)
-                # print(f'Reproj error: {calibration_results.repError}')
-                # latest_error = calibration_results.repError
-                # matrix_outputs = '\n'.join([
-                #     f'cam_mat = np.array({",".join(str(calibration_results.camMatrix).split())})'.replace('[,','['),
-                #     '# k1, k2, p1, p2, k3, k4, k5, k6, s1, s2, s3, s4, Tx, Ty',
-                #     f'dist_coeffs = np.array({",".join(str(calibration_results.distcoeff).split())})'.replace('[,','[')
-                # ])
-                
-                num_batches = num_total_images_used//CALIB_BATCH_SIZE
-                calib_path = logs_path / 'intrinsics'
-                calib_path.mkdir(exist_ok=True, parents=True)
-
-                with open(f'{calib_path}/{num_batches}.txt', 'w+') as f:
-                    f.write(f'{R},{T}')
+            # Save image if live
             if LIVE:
                 cv.imwrite(f'{imgs_path}/{len(list(imgs_path.glob("*.png")))}.png', img_bgr_l)
 
-        # Run stereo calibration when enough pairs collected
-        STEREO_CALIB_BATCH_SIZE = 15
-        if len(stereo_object_points) >= STEREO_CALIB_BATCH_SIZE:
-            print("Running stereo calibration...")
-            ret, cam_mat_l, dist_l, cam_mat_r, dist_r, R, T, E, F = cv.stereoCalibrate(
-                stereo_object_points,
-                stereo_image_points_l,
-                stereo_image_points_r,
-                cam_mat, dist_coeffs,
-                cam_mat, dist_coeffs,
-                img_bgr_l.shape[:2][::-1],
-                flags=cv.CALIB_FIX_INTRINSIC
-            )
-            print(f"Stereo reprojection error: {ret}")
-            print("Left Camera Matrix:\n", cam_mat_l)
-            print("Right Camera Matrix:\n", cam_mat_r)
-            print("Rotation:\n", R)
-            print("Translation:\n", T)
-            # Save results if needed
-            # Reset lists to avoid repeated calibration
-            stereo_object_points.clear()
-            stereo_image_points_l.clear()
-            stereo_image_points_r.clear()
+            # Staged calibration approach
+            if LIVE:
+                # Stage 1: First 15 images - intrinsics calibration only
+                if num_total_images_used == INTRINSICS_BATCH_SIZE and not intrinsics_calibrated:
+                    print(f"\n=== STAGE 1: Intrinsics Calibration ({INTRINSICS_BATCH_SIZE} images) ===")
+                    
+                    # Calibrate left camera
+                    ret_l, matrix_l, dist_l, rvecs_l, tvecs_l = run_individual_camera_calibration(
+                        stereo_object_points, stereo_image_points_l, DIM, cam_mat, dist_coeffs
+                    )
+                    
+                    # Calibrate right camera  
+                    ret_r, matrix_r, dist_r, rvecs_r, tvecs_r = run_individual_camera_calibration(
+                        stereo_object_points, stereo_image_points_r, DIM, cam_mat, dist_coeffs
+                    )
+                    
+                    if ret_l is not None and ret_r is not None:
+                        # Update camera matrices with calibrated intrinsics
+                        cam_mat = matrix_l  # Use left camera intrinsics as default
+                        dist_coeffs = dist_l
+                        matrix_l = matrix_l
+                        matrix_r = matrix_r
+                        dist_l = dist_l
+                        dist_r = dist_r
+                        
+                        intrinsics_calibrated = True
+                        print("✓ Intrinsics calibration completed!")
+                        print(f"Left camera error: {ret_l:.4f}, Right camera error: {ret_r:.4f}")
+                        
+                        # Save intrinsics results
+                        calib_path = logs_path / 'intrinsics'
+                        calib_path.mkdir(exist_ok=True, parents=True)
+
+                        newline = '\n'
+                        
+                        intrinsics_results = '\n'.join([
+                            '# Left Camera Intrinsics',
+                            f'matrix_l = np.array({str(matrix_l).replace(newline, "")})'.replace("  ", " "),
+                            f'dist_l = np.array({str(dist_l).replace(newline, "")})'.replace("  ", " "),
+                            '# Right Camera Intrinsics', 
+                            f'matrix_r = np.array({str(matrix_r).replace(newline, "")})'.replace("  ", " "),
+                            f'dist_r = np.array({str(dist_r).replace(newline, "")})'.replace("  ", " ")
+                        ])
+
+                        extrinsics_so_far = '\n'.join([
+                            '# Current Moving Average Extrinsics',
+                            f'R_avg = np.array({str(R_avg).replace(newline, "")})'.replace("  ", " "),
+                            f'T_avg = np.array({str(T_avg).replace(newline, "")})'.replace("  ", " "),
+                            f'# Baseline: {np.linalg.norm(T_avg):.2f}'
+                        ])
+
+                        print(intrinsics_results)
+                        print(extrinsics_so_far)
+                        
+                        with open(f'{calib_path}/intrinsics_stage1.txt', 'w+') as f:
+                            f.write(intrinsics_results)
+                    else:
+                        print("✗ Intrinsics calibration failed")
+                
+                    print(f"\n=== STAGE 2: Stereo Calibration ({STEREO_BATCH_SIZE} images) ===")
+                    print(f"Using moving average as initial conditions:")
+                    print(f"R_avg samples: {len(R_history)}")
+                    print(f"T_avg baseline: {np.linalg.norm(T_avg):.2f}mm")
+                    
+                    # Run stereo calibration with moving average initial conditions
+                    if len(R_history) >= 3:  # Ensure we have some moving average data
+                        stereo_result = run_stereo_calibration_with_initial(
+                            stereo_object_points, stereo_image_points_l, stereo_image_points_r,
+                            matrix_l, dist_l, matrix_r, dist_r, DIM, 
+                            R_init=R_avg, T_init=T_avg.reshape(3,1)
+                        )
+                        
+                        if stereo_result[0] is not None:  # ret is not None
+                            ret, K1, D1, K2, D2, R, T, E, F = stereo_result
+                            stereo_calibrated = True
+                            
+                            print("✓ Stereo calibration completed!")
+                            print(f"Stereo reprojection error: {ret:.4f}")
+                            print(f"Final baseline: {np.linalg.norm(T):.2f}mm")
+                            
+                            # Update camera matrices with stereo results
+                            matrix_l = K1
+                            matrix_r = K2
+                            dist_l = D1
+                            dist_r = D2
+                            
+                            # Update rectification with final stereo parameters
+                            rectify_maps = setup_stereo_rectification(K1, D1, K2, D2, R, T, DIM)
+                            if rectify_maps is not None:
+                                rectification_ready = True
+                                print("✓ Rectification maps updated with stereo calibration results")
+                            
+                            # Save stereo results
+                            calib_path = logs_path / 'stereo'
+                            calib_path.mkdir(exist_ok=True, parents=True)
+                            
+                            stereo_results = '\n'.join([
+                                '# Stereo Calibration Results',
+                                f'# Reprojection Error: {ret:.4f}',
+                                f'K1 = np.array({str(K1).replace(newline, "")})'.replace("  ", " "),
+                                f'D1 = np.array({str(D1).replace(newline, "")})'.replace("  ", " "),
+                                f'K2 = np.array({str(K2).replace(newline, "")})'.replace("  ", " "),
+                                f'D2 = np.array({str(D2).replace(newline, "")})'.replace("  ", " "),
+                                f'R = np.array({str(R).replace(newline, "")})'.replace("  ", " "),
+                                f'T = np.array({str(T).replace(newline, "")})'.replace("  ", " "),
+                                f'# Baseline: {np.linalg.norm(T):.2f}mm'
+                            ])
+                            
+                            with open(f'{calib_path}/stereo_stage2.txt', 'w+') as f:
+                                f.write(stereo_results)
+                        else:
+                            print("✗ Stereo calibration failed")
+                    else:
+                        print("✗ Not enough moving average samples for stereo calibration")
+                
+                # Stage 3: Continuous refinement (every 15 images after stage 2)
+                elif stereo_calibrated and num_total_images_used > STEREO_BATCH_SIZE and (num_total_images_used % INTRINSICS_BATCH_SIZE == 0):
+                    print(f"\n=== STAGE 3: Refinement ({num_total_images_used} images) ===")
+                    
+                    # Use latest moving averages for continuous refinement
+                    if len(R_history) >= 5:
+                        stereo_result = run_stereo_calibration_with_initial(
+                            stereo_object_points[-min(45, len(stereo_object_points)):],  # Use recent samples
+                            stereo_image_points_l[-min(45, len(stereo_image_points_l)):], 
+                            stereo_image_points_r[-min(45, len(stereo_image_points_r)):],
+                            matrix_l, dist_l, matrix_r, dist_r, DIM,
+                            R_init=R_avg, T_init=T_avg.reshape(3,1)
+                        )
+                        
+                        if stereo_result[0] is not None:
+                            ret, K1, D1, K2, D2, R, T, E, F = stereo_result
+                            print(f"✓ Refinement complete - error: {ret:.4f}, baseline: {np.linalg.norm(T):.2f}mm")
+                            
+                            # Update rectification with refined parameters
+                            rectify_maps = setup_stereo_rectification(K1, D1, K2, D2, R, T, DIM)
+                        else:
+                            print("⚠ Refinement calibration failed")
+            else:
+                # For folder processing, run calibration at the end
+                if index >= len(images):
+                    print("Running final calibration for folder processing...")
+                    # Run similar staged approach but all at once
+                    pass
 
         if key == ord("q"):
             break
