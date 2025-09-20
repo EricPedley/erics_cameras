@@ -1,0 +1,39 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Calibrate Fisheye Camera",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/erics_cameras/scripts/calibrate.py",
+            "args": [
+                "--source",
+                "folder",
+                "--source_path",
+                "/home/miller/code/erics_cameras/src/erics_cameras/scripts/logs/2025-09-19/14-54/calib_imgs",
+                "--disable_motion_check",
+                "--disable_time_check",
+                "--calibration_model",
+                "fisheye"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/src/erics_cameras/scripts",
+            "justMyCode": true
+        },
+        {
+            "name": "Calibrate Fisheye USB Camera",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/erics_cameras/scripts/calibrate.py",
+            "args": [
+                "--source",
+                "v4l2",
+                "--calibration_model",
+                "fisheye"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}/src/erics_cameras/scripts",
+            "justMyCode": true
+        },
+    ]
+}
