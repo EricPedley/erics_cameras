@@ -45,6 +45,91 @@ if __name__ == '__main__':
         t_rel = tvec2 - R_rel @ tvec1
         
         return R_rel, t_rel
+    
+    def update_moving_average_rotation(R_new, R_history, window_size=10):
+        """Update moving average for rotation matrices using proper SO(3) averaging"""
+        R_history.append(R_new.copy())
+        if len(R_history) > window_size:
+            R_history.pop(0)
+        
+        # For rotation matrices, we need to use proper averaging on SO(3)
+        # Simple approach: average and re-orthogonalize
+        R_avg = np.mean(R_history, axis=0)
+        U, s, Vt = np.linalg.svd(R_avg)
+        R_avg = U @ Vt
+        if np.linalg.det(R_avg) < 0:
+            R_avg = U @ np.diag([1, 1, -1]) @ Vt
+        
+        return R_avg
+    
+    def update_moving_average_translation(t_new, t_history, window_size=10):
+        """Update moving average for translation vectors"""
+        t_history.append(t_new.copy())
+        if len(t_history) > window_size:
+            t_history.pop(0)
+        
+        return np.mean(t_history, axis=0)
+    
+    def setup_stereo_rectification(K1, D1, K2, D2, R, T, image_size):
+        """Setup stereo rectification maps for fisheye cameras"""
+        try:
+            # Compute rectification transforms
+            R1, R2, P1, P2, Q = cv.fisheye.stereoRectify(
+                K1, D1, K2, D2, image_size,
+                R, T,
+                flags=0,
+                newImageSize=image_size,
+                balance=0.0,
+                fov_scale=1.0
+            )
+            
+            # Compute rectification maps
+            map1_left, map2_left = cv.fisheye.initUndistortRectifyMap(
+                K1, D1, R1, P1, image_size, cv.CV_16SC2
+            )
+            map1_right, map2_right = cv.fisheye.initUndistortRectifyMap(
+                K2, D2, R2, P2, image_size, cv.CV_16SC2
+            )
+            
+            return {
+                'map1_left': map1_left, 'map2_left': map2_left,
+                'map1_right': map1_right, 'map2_right': map2_right,
+                'R1': R1, 'R2': R2, 'P1': P1, 'P2': P2, 'Q': Q
+            }
+        except Exception as e:
+            print(f"Error setting up rectification: {e}")
+            return None
+    
+    def apply_rectification(img_left, img_right, rectify_maps):
+        """Apply rectification to stereo image pair"""
+        if rectify_maps is None:
+            return img_left, img_right
+        
+        try:
+            img_left_rect = cv.remap(
+                img_left, rectify_maps['map1_left'], rectify_maps['map2_left'], cv.INTER_LINEAR
+            )
+            img_right_rect = cv.remap(
+                img_right, rectify_maps['map1_right'], rectify_maps['map2_right'], cv.INTER_LINEAR
+            )
+            return img_left_rect, img_right_rect
+        except Exception as e:
+            print(f"Error applying rectification: {e}")
+            return img_left, img_right
+    
+    def draw_epipolar_lines(img_left, img_right, line_spacing=50):
+        """Draw horizontal epipolar lines on rectified images"""
+        img_left_lines = img_left.copy()
+        img_right_lines = img_right.copy()
+        
+        height = img_left.shape[0]
+        
+        # Draw horizontal lines every 'line_spacing' pixels
+        for y in range(0, height, line_spacing):
+            cv.line(img_left_lines, (0, y), (img_left.shape[1], y), (0, 255, 0), 1)
+            cv.line(img_right_lines, (0, y), (img_right.shape[1], y), (0, 255, 0), 1)
+        
+        return img_left_lines, img_right_lines
     parser = argparse.ArgumentParser(description="Camera calibration script.")
     parser.add_argument(
         "--cam_type", help="Type of camera to use for calibration.", choices=["0", "1", "2"], default=None
@@ -103,6 +188,26 @@ if __name__ == '__main__':
     stereo_image_points_l = []
     stereo_image_points_r = []
 
+    # Moving average for R and T
+    R_history = []
+    T_history = []
+    R_avg = np.eye(3)
+    T_avg = np.array([[0.116], [0], [0]])  # Initial estimate
+    
+    # Rectification state
+    rectify_maps = None
+    rectification_ready = False
+
+    # Moving average for R and T
+    R_history = []
+    T_history = []
+    R_avg = np.eye(3)
+    T_avg = np.array([[0.116], [0], [0]])  # Initial estimate
+    
+    # Rectification state
+    rectify_maps = None
+    rectification_ready = False
+
     LIVE = bool(os.getenv("LIVE", True))
 
     if LIVE:
@@ -123,6 +228,9 @@ if __name__ == '__main__':
         cv.namedWindow("left", cv.WINDOW_NORMAL)
         cv.namedWindow("right", cv.WINDOW_NORMAL)
         cv.namedWindow("charuco", cv.WINDOW_NORMAL)
+        # Add side-by-side rectification window
+        cv.namedWindow("rectified_stereo", cv.WINDOW_NORMAL)
+        cv.resizeWindow("rectified_stereo", (1280, 480))
         # cv.resizeWindow("calib", (1024, 576))
         board_img = cv.cvtColor(cv.rotate(charuco_board.generateImage((1080,1920), marginSize=10), cv.ROTATE_90_CLOCKWISE), cv.COLOR_GRAY2BGR)
         # cv.resizeWindow("charuco_board", (1600,900))
@@ -222,7 +330,21 @@ if __name__ == '__main__':
             )
 
             R, t = compute_relative_pose(rvecs_l, tvecs_l, rvecs_r, tvecs_r)
-            print(R,t)
+            
+            # Update moving averages for R and T
+            R_avg = update_moving_average_rotation(R, R_history, window_size=10)
+            T_avg = update_moving_average_translation(t, T_history, window_size=10)
+            
+            # Setup/update rectification with averaged parameters
+            if len(R_history) >= 3:  # Wait for a few samples before rectification
+                rectify_maps = setup_stereo_rectification(
+                    cam_mat, dist_coeffs, cam_mat, dist_coeffs,
+                    R_avg, T_avg, DIM
+                )
+                if rectify_maps is not None:
+                    rectification_ready = True
+            
+            # print(R,t)
             if ret:
                 reproj: np.ndarray = cv.fisheye.projectPoints(
                     full_refs_l.object_points, rvecs_l, tvecs_l, cam_mat, dist_coeffs
@@ -353,6 +475,48 @@ if __name__ == '__main__':
             cv.imshow("left", cv.resize(img_l_debug, (1024, 576)))
             cv.imshow("right", cv.resize(img_r_debug, (1024, 576)))
             cv.imshow("charuco", board_img)
+            
+            # Display rectified images with epipolar lines if rectification is ready
+            if rectification_ready and rectify_maps is not None:
+                img_left_rect, img_right_rect = apply_rectification(img_bgr_l, img_bgr_r, rectify_maps)
+                img_left_epi, img_right_epi = draw_epipolar_lines(img_left_rect, img_right_rect, line_spacing=50)
+                
+                # Add status text to rectified images
+                baseline_norm = np.linalg.norm(T_avg)
+                cv.rectangle(img_left_epi, (0, 0), (300, 60), (0, 0, 0), -1)
+                cv.rectangle(img_right_epi, (0, 0), (300, 60), (0, 0, 0), -1)
+                
+                cv.putText(img_left_epi, f"Baseline: {baseline_norm:.2f}mm", (5, 15),
+                          cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                cv.putText(img_left_epi, f"R samples: {len(R_history)}", (5, 30),
+                          cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                cv.putText(img_left_epi, "LEFT RECTIFIED", (5, 45),
+                          cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                          
+                cv.putText(img_right_epi, f"Baseline: {baseline_norm:.2f}mm", (5, 15),
+                          cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                cv.putText(img_right_epi, f"T samples: {len(T_history)}", (5, 30),
+                          cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                cv.putText(img_right_epi, "RIGHT RECTIFIED", (5, 45),
+                          cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                
+                # Create side-by-side display
+                # Resize to consistent size
+                left_resized = cv.resize(img_left_epi, (640, 480))
+                right_resized = cv.resize(img_right_epi, (640, 480))
+                
+                # Concatenate horizontally
+                side_by_side = np.hstack((left_resized, right_resized))
+                cv.imshow("rectified_stereo", side_by_side)
+            else:
+                # Show a placeholder if rectification not ready
+                placeholder = np.zeros((480, 1280, 3), dtype=np.uint8)
+                cv.putText(placeholder, "Rectification not ready - need more pose samples", 
+                          (10, 240), cv.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                cv.putText(placeholder, f"R samples: {len(R_history)}, T samples: {len(T_history)}", 
+                          (10, 280), cv.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+                cv.imshow("rectified_stereo", placeholder)
+                
             key = cv.waitKey(1)
         else:
             key = 1
