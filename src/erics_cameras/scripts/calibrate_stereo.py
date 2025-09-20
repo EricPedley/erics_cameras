@@ -141,7 +141,6 @@ if __name__ == '__main__':
                 cam_mat_init.copy(),
                 dist_coeffs_init.copy(),
                 flags=cv.fisheye.CALIB_RECOMPUTE_EXTRINSIC,
-                criteria=(cv.TERM_CRITERIA_EPS + cv.TERM_CRITERIA_MAX_ITER, 50, 1e-5)
             )
             print(f"Individual camera calibration error: {ret:.4f}")
             return ret, cam_mat, dist_coeffs, rvecs, tvecs
@@ -589,23 +588,17 @@ if __name__ == '__main__':
                     
                     # Calibrate left camera
                     ret_l, matrix_l, dist_l, rvecs_l, tvecs_l = run_individual_camera_calibration(
-                        stereo_object_points, stereo_image_points_l, DIM, cam_mat, dist_coeffs
+                        stereo_object_points, stereo_image_points_l, DIM, matrix_l, dist_l
                     )
                     
                     # Calibrate right camera  
                     ret_r, matrix_r, dist_r, rvecs_r, tvecs_r = run_individual_camera_calibration(
-                        stereo_object_points, stereo_image_points_r, DIM, cam_mat, dist_coeffs
+                        stereo_object_points, stereo_image_points_r, DIM, matrix_r, dist_r
                     )
+
+                    # TODO: use recomputed rvecs and tvecs to update R and t
                     
                     if ret_l is not None and ret_r is not None:
-                        # Update camera matrices with calibrated intrinsics
-                        cam_mat = matrix_l  # Use left camera intrinsics as default
-                        dist_coeffs = dist_l
-                        matrix_l = matrix_l
-                        matrix_r = matrix_r
-                        dist_l = dist_l
-                        dist_r = dist_r
-                        
                         intrinsics_calibrated = True
                         print("✓ Intrinsics calibration completed!")
                         print(f"Left camera error: {ret_l:.4f}, Right camera error: {ret_r:.4f}")
