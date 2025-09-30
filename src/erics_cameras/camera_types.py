@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 from enum import Enum
 from scipy.spatial.transform import Rotation
+import time
 
 
 integer = Union[
@@ -71,7 +72,7 @@ class Image(Generic[_UnderlyingImageT]):
         image_chw[torch.Tensor] = Image(torch.zeros((3, 20, 20)), CHW)
     """
 
-    def __init__(self, array: _UnderlyingImageT, dim_order: ImageDimensionsOrder = HWC):
+    def __init__(self, array: _UnderlyingImageT, dim_order: ImageDimensionsOrder = HWC, timestamp: float | None = None):
         if array is None:
             raise TypeError(
                 "array cannot be None. Please provide a valid numpy array."
@@ -100,6 +101,7 @@ class Image(Generic[_UnderlyingImageT]):
         global _id
         self._id = _id
         _id += 1
+        self.timestamp = time.time() if timestamp is None else timestamp
 
     def __getitem__(self, key):
         return self._array[key]
