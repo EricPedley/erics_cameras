@@ -2,7 +2,7 @@
 This does the same thing as `gazebo/camera_read.py` but wraps it in a different interface to be the same as `arducam.py`.
 """
 
-from erics_cameras.camera import Camera, ImageMetadata
+from erics_cameras.camera import Camera, ImageMetadata, Image
 from pathlib import Path
 from time import time
 import subprocess
@@ -13,9 +13,7 @@ import numpy as np
 import rclpy
 import rclpy.node
 from cv_bridge import CvBridge
-from sensor_msgs.msg import Image
-import PIL.Image
-import cv2
+from sensor_msgs.msg import Image as ROSImage
 from scipy.spatial.transform import Rotation
 import threading
 from rclpy.executors import SingleThreadedExecutor
@@ -38,16 +36,16 @@ class GazeboCameraStream(rclpy.node.Node):
     def __init__(self, img_topic="/camera/image"):
         super().__init__("uavf_2025_gazebo_camera_stream")
         self.subscription = self.create_subscription(
-            Image, img_topic, self.listener_callback, 10
+            ROSImage, img_topic, self.listener_callback, 10
         )
         self.bridge = CvBridge()
-        self.latest_msg: Image = None
+        self.latest_msg: ROSImage = None
         self.custom_executor = SingleThreadedExecutor()
         self.custom_executor.add_node(self)
         self.bad_count = 0
         self._connected = False
 
-    def listener_callback(self, msg: Image):
+    def listener_callback(self, msg: ROSImage):
         self.latest_msg = msg
 
     def connect(self):
@@ -88,13 +86,11 @@ class GazeboCam(Camera):
         img_arr = self.stream.get_frame()
         if img_arr is None:
             return None
-        return img_arr
+        return Image(img_arr)
 
     def get_metadata(self) -> ImageMetadata:
         return ImageMetadata(
             timestamp=time(),
-            relative_pose=self._relative_pose,
-            focal_len_px=self.get_focal_length_px(),
         )
 
     def get_focal_length_px(self) -> float:
