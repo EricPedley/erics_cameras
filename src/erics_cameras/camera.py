@@ -125,10 +125,11 @@ class Camera(ABC):
         self.recording = False
 
         # Controls whether images and data are submitted to the `threaded_logger`
-        if log_dir:
+        if log_dir is not None:
             self.threaded_logger = CameraLogger(Path(log_dir))
             self.logging = True
         else:
+            self.threaded_logger = None
             self.logging = False
 
         self.metadata_buffer = InterpolatableBuffer()
@@ -142,6 +143,9 @@ class Camera(ABC):
 
     def set_log_dir(self, log_dir: str | Path):
         self.log_dir = Path(log_dir)
+        if self.threaded_logger is None:
+            self.threaded_logger = CameraLogger(Path(log_dir))
+        self.logging=True
 
     def _recording_worker(self):
         """
@@ -182,8 +186,10 @@ class Camera(ABC):
 
             time.sleep(0.1)
 
-    def start_recording(self):
-        if self.recording or not self.logging:
+    def start_recording(self, logs_path: str|Path|None = None):
+        if logs_path:
+            self.set_log_dir(logs_path)
+        if self.recording or (logs_path is None and not self.logging):
             return
         self.recording_thread = threading.Thread(target=self._recording_worker)
         self.recording = True

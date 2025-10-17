@@ -28,9 +28,10 @@ class USBCam(Camera):
     def __init__(
         self,
         log_dir: str | Path | None = None,
-        resolution: ResolutionOption = ResolutionOption.R720P_DUAL,
+        resolution: ResolutionOption = ResolutionOption.R1080P,
         flipped=False,  # because of how they're mounted we might have to flip them sometimes.
         video_path="/dev/video0",
+        framerate=30,
     ):
         super().__init__(log_dir)
         self._log_dir = log_dir
@@ -40,7 +41,7 @@ class USBCam(Camera):
         # laptop params:
         self._pipeline_str = (
             rf"v4l2src device={video_path} io-mode=2 ! "
-            rf"image/jpeg,width={resolution.value[0]},height={resolution.value[1]},framerate=30/1 ! "
+            rf"image/jpeg,width={resolution.value[0]},height={resolution.value[1]},framerate={framerate}/1 ! "
             r"jpegdec ! "
             r"videoconvert ! "
             r"video/x-raw, format=BGR ! "

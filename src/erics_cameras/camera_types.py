@@ -7,7 +7,7 @@ import numpy as np
 from enum import Enum
 from scipy.spatial.transform import Rotation
 import time
-
+import rerun as rr
 
 integer = Union[
     int,
@@ -205,7 +205,10 @@ class Image(Generic[_UnderlyingImageT]):
         if self._dim_order == CHW:
             np_array = np_array.transpose(1, 2, 0)
 
+
         cv2.imwrite(str(fp) + f"/{self._id}.jpg", np_array)
+        if rr.is_enabled():
+            rr.log("camera/image", rr.EncodedImage(path=str(fp) + f"/{self._id}.jpg", media_type="image/jpeg"))
 
     def change_dim_order(self, target_dim_order: ImageDimensionsOrder) -> None:
         """
